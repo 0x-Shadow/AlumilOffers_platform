@@ -4,6 +4,9 @@ Desktop app for aluminum workshops (Windows): quotes with materials,
 a visual designs catalog (windows, doors, dimensions), customers,
 and professional PDF export with VAT — everything offline in one app.
 
+🌐 **Landing page:** [`landing/index.html`](landing/index.html) — self-contained,
+no dependencies (publish it with GitHub Pages: Settings → Pages → `main` → `/landing`).
+
 > 🇬🇷 Σύντομα ελληνικά: οδηγίες βήμα-βήμα για Windows στο [docs/INSTALL_EL.md](docs/INSTALL_EL.md).
 
 ## Features
