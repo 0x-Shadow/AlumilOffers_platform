@@ -1,4 +1,4 @@
-# AluminaOffers
+# AlumilOffers_platform
 
 Desktop app for aluminum workshops (Windows): quotes with materials,
 a visual designs catalog (windows, doors, dimensions), customers,
