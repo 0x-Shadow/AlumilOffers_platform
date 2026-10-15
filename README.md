@@ -28,6 +28,13 @@ no dependencies (publish it with GitHub Pages: Settings → Pages → `main` →
 - Windows 10/11
 - Python 3.11+ (only for running from source; the `.exe` needs nothing)
 
+## Install (recommended)
+
+Download `Setup_AluminaOffers_X.Y.Z.exe` from
+[Releases](https://github.com/0x-Shadow/AlumilOffers_platform/releases),
+run it and follow the wizard (license, folder, shortcuts, uninstaller).
+No Python needed.
+
 ## Quick start (from source)
 
 ```bat
