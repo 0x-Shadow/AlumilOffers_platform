@@ -1,3 +1,4 @@
-customtkinter>=5.2.2
-reportlab>=4.0.0
-pillow>=10.0.0
+# Pinned minimums (tested 2026-10). Upgrade deliberately, then re-test PDF + images.
+customtkinter==5.2.2
+reportlab==5.0.1
+pillow==12.3.0

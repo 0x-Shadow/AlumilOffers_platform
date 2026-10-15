@@ -3,11 +3,56 @@
 AluminaOffers v4 - Προσφορές Αλουμινάδων για Windows
 Dashboard | Νέα Προσφορά (μία οθόνη) | Κατάλογος | Στοιχεία+Λογότυπο | PDF με ΦΠΑ
 """
-import os, sqlite3, json, shutil
+import os, sqlite3, json, shutil, re, html, sys, subprocess
 from datetime import datetime
 from tkinter import messagebox, filedialog
 import customtkinter as ctk
 from PIL import Image as PILImage
+# Hardening: cap decompressed pixels (decompression-bomb DoS) + cap file size on upload
+try:
+    PILImage.MAX_IMAGE_PIXELS = 50_000_000
+except Exception:
+    pass
+MAX_UPLOAD_BYTES = 15 * 1024 * 1024
+
+def esc(s):
+    """Escape user text for ReportLab Paragraph (mini-HTML)."""
+    return html.escape(str(s or ""), quote=False)
+
+def safe_quote_number(s, fallback="prosfora"):
+    s = str(s or "").strip() or fallback
+    s = re.sub(r"[^A-Za-z0-9\u0370-\u03FF_\-]+", "_", s)[:40].strip("_") or fallback
+    if s in (".", ".."):
+        return fallback
+    return s
+
+def safe_img_name(name):
+    """Containment: IMG_DIR/basename only, no traversal, no absolute escape."""
+    if not name:
+        return None
+    b = os.path.basename(str(name))
+    if b in ("", ".", "..") or b.startswith("."):
+        return None
+    # allow only sane chars + known extensions
+    if not re.fullmatch(r"[A-Za-z0-9\u0370-\u03FF_\-]+\.(jpg|jpeg|png|bmp|webp)", b, re.IGNORECASE):
+        # timestamped names from store_image always match; anything else -> reject
+        return None
+    return b
+
+def open_path_safe(path):
+    """Cross-platform replacement for os.startfile (Windows-only, crashes elsewhere)."""
+    try:
+        if sys.platform.startswith("win"):
+            os.startfile(path)  # noqa: S606 - local file, user-triggered
+        elif sys.platform == "darwin":
+            subprocess.run(["open", path], check=False)
+        else:
+            subprocess.run(["xdg-open", path], check=False)
+    except Exception as e:
+        try:
+            messagebox.showwarning("Προσοχή", f"Δεν άνοιξε αυτόματα:\n{path}\n{e}")
+        except Exception:
+            pass
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -120,7 +165,10 @@ def get_logo():
     return LOGO_FILE if os.path.exists(LOGO_FILE) else None
 
 def set_logo(src):
+    if os.path.getsize(src) > MAX_UPLOAD_BYTES:
+        raise ValueError("Η εικόνα είναι πολύ μεγάλη (όριο 15MB).")
     with PILImage.open(src) as im:
+        im.load()  # force decode now, inside try in caller
         im = im.convert("RGB")
         im.thumbnail((600, 600))
         im.save(LOGO_FILE, "PNG")
@@ -129,10 +177,18 @@ def set_logo(src):
 def img_path(name):
     if not name:
         return None
-    p = name if os.path.isabs(name) else os.path.join(IMG_DIR, name)
+    b = safe_img_name(name)
+    if not b:
+        return None
+    p = os.path.join(IMG_DIR, b)
     return p if os.path.exists(p) else None
 
 def store_image(src):
+    if os.path.getsize(src) > MAX_UPLOAD_BYTES:
+        raise ValueError("Η εικόνα είναι πολύ μεγάλη (όριο 15MB).")
+    # verify it really decodes as an image before copying (rejects polyglots early)
+    with PILImage.open(src) as im:
+        im.verify()
     ext = os.path.splitext(src)[1].lower() or ".jpg"
     if ext not in (".jpg", ".jpeg", ".png", ".bmp", ".webp"):
         ext = ".jpg"
@@ -227,29 +283,29 @@ def make_pdf(q, filepath):
 
     story = []
     logo = get_logo()
-    head_info = (f"<font size=20 color=\"#1a56db\"><b>{comp.get('name','')}</b></font><br/>"
-        f"{comp.get('address','')} &nbsp;&nbsp;|&nbsp;&nbsp; Τηλ: {comp.get('phone','')}<br/>"
-        f"Email: {comp.get('email','')} &nbsp;&nbsp;|&nbsp;&nbsp; ΑΦΜ: {comp.get('afm','')} &nbsp;&nbsp; ΔΟΥ: {comp.get('doy','')}")
+    head_info = (f"<font size=20 color=\"#1a56db\"><b>{esc(comp.get('name',''))}</b></font><br/>"
+        f"{esc(comp.get('address',''))} &nbsp;&nbsp;|&nbsp;&nbsp; Τηλ: {esc(comp.get('phone',''))}<br/>"
+        f"Email: {esc(comp.get('email',''))} &nbsp;&nbsp;|&nbsp;&nbsp; ΑΦΜ: {esc(comp.get('afm',''))} &nbsp;&nbsp; ΔΟΥ: {esc(comp.get('doy',''))}")
     if logo:
         lim = pdf_image(logo, max_w=38*mm, max_h=26*mm)
         ht = Table([[lim, Paragraph(head_info, st_small)]], colWidths=[42*mm, 128*mm])
         ht.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'MIDDLE')]))
         story.append(ht)
     else:
-        story.append(Paragraph(comp.get("name", ""), st_title))
+        story.append(Paragraph(esc(comp.get("name", "")), st_title))
         story.append(Paragraph(
-            f"{comp.get('address','')} &nbsp;&nbsp;|&nbsp;&nbsp; Τηλ: {comp.get('phone','')}<br/>"
-            f"Email: {comp.get('email','')} &nbsp;&nbsp;|&nbsp;&nbsp; ΑΦΜ: {comp.get('afm','')} &nbsp;&nbsp; ΔΟΥ: {comp.get('doy','')}", st_small))
+            f"{esc(comp.get('address',''))} &nbsp;&nbsp;|&nbsp;&nbsp; Τηλ: {esc(comp.get('phone',''))}<br/>"
+            f"Email: {esc(comp.get('email',''))} &nbsp;&nbsp;|&nbsp;&nbsp; ΑΦΜ: {esc(comp.get('afm',''))} &nbsp;&nbsp; ΔΟΥ: {esc(comp.get('doy',''))}", st_small))
     story.append(HRFlowable(width="100%", thickness=1.2, color=BLUE, spaceAfter=8, spaceBefore=4))
 
     meta = Table([
-        [Paragraph(f"<b>Ημερομηνία:</b> {q['date']}", st_right)],
+        [Paragraph(f"<b>Ημερομηνία:</b> {esc(q['date'])}", st_right)],
     ], colWidths=[170*mm])
     meta.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ('LEFTPADDING', (1, 0), (1, 0), 0)]))
     story.append(meta)
     story.append(Spacer(1, 6))
-    cust = Table([[Paragraph(f"<b>{q['customer_name']}</b><br/><font size=9>{q.get('customer_info','')}</font>", st_n)]],
+    cust = Table([[Paragraph(f"<b>{esc(q['customer_name'])}</b><br/><font size=9>{esc(q.get('customer_info',''))}</font>", st_n)]],
                  colWidths=[174*mm])
     cust.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, -1), LIGHT_BG),
@@ -266,9 +322,9 @@ def make_pdf(q, filepath):
         for it in items:
             qty = float(it.get("qty", 0)); pr = float(it.get("price", 0))
             data.append([
-                Paragraph(it.get("name", ""), st_cell),
+                Paragraph(esc(it.get("name", "")), st_cell),
                 Paragraph(str(qty).rstrip("0").rstrip(".") if "." in str(qty) else str(qty), st_cell),
-                Paragraph(it.get("unit", ""), st_cell),
+                Paragraph(esc(it.get("unit", "")), st_cell),
                 Paragraph(fmt(pr), st_cell),
                 Paragraph(fmt(qty*pr), st_cell),
             ])
@@ -291,17 +347,17 @@ def make_pdf(q, filepath):
         for d in designs:
             pth = img_path(d.get("image", ""))
             im = pdf_image(pth) if pth else None
-            dims = f"{d.get('width','')} x {d.get('height','')} εκ." if d.get("width") or d.get("height") else "-"
+            dims = f"{esc(d.get('width',''))} x {esc(d.get('height',''))} εκ." if d.get("width") or d.get("height") else "-"
             try:
                 dq = float(d.get("qty", 1) or 1)
             except Exception:
                 dq = 1
-            info = (f"<b>{d.get('code','')} - {d.get('name','')}</b><br/>"
-                    f"Κατηγορία: {d.get('category','')}<br/>"
+            info = (f"<b>{esc(d.get('code',''))} - {esc(d.get('name',''))}</b><br/>"
+                    f"Κατηγορία: {esc(d.get('category',''))}<br/>"
                     f"Διαστάσεις (Π x Υ): <b>{dims}</b><br/>"
                     f"Τεμάχια: <b>{dq:g}</b>")
             if d.get("descr"):
-                info += f"<br/><font size=8>{d.get('descr','')}</font>"
+                info += f"<br/><font size=8>{esc(d.get('descr',''))}</font>"
             cells = [[im or Paragraph("(χωρίς εικόνα)", st_small), Paragraph(info, st_d)]]
             dt = Table(cells, colWidths=[70*mm, 100*mm])
             dt.setStyle(TableStyle([
@@ -328,8 +384,8 @@ def make_pdf(q, filepath):
                     except Exception:
                         mq = 0
                     mrows.append([
-                        Paragraph(m.get("name", ""), st_cell),
-                        Paragraph(f"{mq:g} {m.get('unit','')}".strip(), st_cell),
+                        Paragraph(esc(m.get("name", "")), st_cell),
+                        Paragraph(esc(f"{mq:g} {m.get('unit','')}").strip(), st_cell),
                         Paragraph(fmt(m.get("price", 0)), st_cell),
                     ])
                 mt = Table(mrows, colWidths=[96*mm, 38*mm, 36*mm])
@@ -365,9 +421,9 @@ def make_pdf(q, filepath):
     story.append(Spacer(1, 10))
     if q.get("notes"):
         story.append(Paragraph("<b>Παρατηρήσεις:</b>", st_n))
-        story.append(Paragraph(q["notes"], st_n))
+        story.append(Paragraph(esc(q["notes"]), st_n))
         story.append(Spacer(1, 6))
-    story.append(Paragraph(comp.get("notes", ""), st_small))
+    story.append(Paragraph(esc(comp.get("notes", "")), st_small))
     doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
     return filepath
 
@@ -531,7 +587,7 @@ class App(ctk.CTk):
         ctk.CTkLabel(right, text="Γρήγορες ενέργειες", font=("Arial", 14, "bold"),
                      text_color=TXTD).pack(anchor="w", padx=4, pady=(4, 6))
         for txt, col, cmd in [
-                ("📁 Φάκελος PDF (αποστολή)", ACCENT, lambda: os.startfile(PDF_DIR)),
+                ("📁 Φάκελος PDF (αποστολή)", ACCENT, lambda: open_path_safe(PDF_DIR)),
                 ("📐 Νέο σχέδιο", BLUEH, lambda: (setattr(self, "_catalog_tab", "Σχέδια"), self.show("catalog"), self.design_dialog())),
                 ("📥 Εισαγωγή σχεδίων", "#8b5cf6", lambda: (setattr(self, "_catalog_tab", "Σχέδια"), self.show("catalog"), self.bulk_import())),
                 ("⚙️ Στοιχεία & λογότυπο", "#64748b", lambda: self.show("settings"))]:
@@ -546,7 +602,7 @@ class App(ctk.CTk):
         e_s = ctk.CTkEntry(bar, width=320, placeholder_text="🔍 Αναζήτηση πελάτη / αριθμού...",
                            font=("Arial", 13)); e_s.pack(side="left")
         ctk.CTkButton(bar, text="📁 Φάκελος PDF", fg_color=ACCENT, width=130,
-                      command=lambda: os.startfile(PDF_DIR)).pack(side="right")
+                      command=lambda: open_path_safe(PDF_DIR)).pack(side="right")
         lst = ctk.CTkScrollableFrame(box, fg_color=CARD, height=210)
         lst.pack(fill="both", expand=True, padx=8, pady=8)
 
@@ -588,9 +644,10 @@ class App(ctk.CTk):
             self.show("home")
 
     def open_pdf(self, q):
-        path = os.path.join(PDF_DIR, f"Prosfora_{q['number']}.pdf")
+        num = safe_quote_number(q['number'])
+        path = os.path.join(PDF_DIR, f"Prosfora_{num}.pdf")
         make_pdf(q, path)
-        os.startfile(path)
+        open_path_safe(path)
 
     # ---------- ΝΕΑ ΠΡΟΣΦΟΡΑ (μία οθόνη: γράψε -> PDF) ----------
     def page_new(self):
@@ -649,12 +706,14 @@ class App(ctk.CTk):
                     p = float((row["e_p"].get() or "0").replace(",", "."))
                 except Exception:
                     p = 0
+                q = max(0.0, min(q, 100000)); p = max(0.0, min(p, 10000000))
                 lt = q * p; sub += lt
                 row["l_sum"].configure(text=fmt(lt))
             try:
                 vr = float(e_vat.get().replace(",", ".")) if e_vat.get() else DEFAULT_FPA
             except Exception:
                 vr = DEFAULT_FPA
+            vr = max(0.0, min(vr, 100.0))
             vat = sub * vr / 100
             lbl_total.configure(text=f"Αρχική αξία: {fmt(sub)}      ΦΠΑ {vr:g}%: {fmt(vat)}")
             lbl_big.configure(text=f"ΣΥΝΟΛΟ ΜΕ ΦΠΑ: {fmt(sub + vat)}")
@@ -768,6 +827,10 @@ class App(ctk.CTk):
                     p = float((row["e_p"].get() or "0").replace(",", "."))
                 except Exception:
                     p = 0
+                if q < 0 or p < 0:
+                    return messagebox.showwarning("Προσοχή", "Ποσότητα και τιμή δεν μπορεί να είναι αρνητικές.")
+                if q > 100000 or p > 10000000:
+                    return messagebox.showwarning("Προσοχή", "Ποσότητα/τιμή εκτός ορίων.")
                 w = row["e_w"].get().strip(); h = row["e_h"].get().strip()
                 base = desc or f"{row.get('code', '')}"
                 name = base + (f" ({w or '-' }x{h or '-' } εκ.)" if (w or h) else "")
@@ -795,12 +858,12 @@ class App(ctk.CTk):
                          "width": L["width"], "height": L["height"], "descr": "",
                          "image": L["image"], "qty": L["qty"],
                          "materials": L.get("materials", [])} for L in lines if L.get("image")]
-            qobj = {"number": e_num.get().strip() or nxt, "date": datetime.now().strftime("%d/%m/%Y"),
+            qobj = {"number": safe_quote_number(e_num.get().strip() or nxt), "date": datetime.now().strftime("%d/%m/%Y"),
                     "customer_id": cid, "customer_name": cname, "customer_info": cinfo,
                     "items_json": json.dumps(items, ensure_ascii=False),
                     "designs_json": json.dumps(qdesigns, ensure_ascii=False),
                     "subtotal": sub, "vat_rate": vr, "vat_amount": vat, "total": tot,
-                    "notes": e_notes.get("1.0", "end").strip()}
+                    "notes": e_notes.get("1.0", "end").strip()[:2000]}
             c.execute("""INSERT INTO quotes(number,date,customer_id,customer_name,customer_info,
                        items_json,designs_json,subtotal,vat_rate,vat_amount,total,notes)
                        VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
@@ -810,7 +873,7 @@ class App(ctk.CTk):
             c.commit(); c.close()
             messagebox.showinfo("ΟΚ", f"Η προσφορά {qobj['number']} αποθηκεύτηκε!")
             path = os.path.join(PDF_DIR, f"Prosfora_{qobj['number']}.pdf")
-            make_pdf(qobj, path); os.startfile(path)
+            make_pdf(qobj, path); open_path_safe(path)
             self.show("home")
         ctk.CTkButton(bot, text="💾 ΑΠΟΘΗΚΕΥΣΗ + PDF", font=("Arial", 16, "bold"),
                       height=52, fg_color=BLUEH, hover_color="#1e40af",
@@ -905,10 +968,12 @@ class App(ctk.CTk):
         c.execute("DELETE FROM designs WHERE id=?", (i,))
         c.commit(); c.close()
         if r and r["image"]:
-            try:
-                os.remove(os.path.join(IMG_DIR, r["image"]))
-            except Exception:
-                pass
+            b = safe_img_name(r["image"])
+            if b:
+                try:
+                    os.remove(os.path.join(IMG_DIR, b))
+                except Exception:
+                    pass
         reload()
 
     def bulk_import(self):
@@ -919,12 +984,26 @@ class App(ctk.CTk):
                  if os.path.splitext(f)[1].lower() in (".jpg", ".jpeg", ".png", ".bmp", ".webp")]
         if not files:
             return messagebox.showwarning("Προσοχή", "Ο φάκελος δεν έχει φωτογραφίες")
+        if len(files) > 500:
+            return messagebox.showwarning("Προσοχή", "Πάρα πολλά αρχεία (όριο 500 ανά εισαγωγή).")
         c = db(); n = 0
-        for f in sorted(files):
-            code = os.path.splitext(f)[0]
+        for f in sorted(files)[:500]:
+            full = os.path.join(folder, f)
+            # no symlinks / dirs, size cap before decode
+            try:
+                if not os.path.isfile(full) or os.path.islink(full):
+                    continue
+                if os.path.getsize(full) > MAX_UPLOAD_BYTES:
+                    continue
+            except Exception:
+                continue
+            code = os.path.splitext(f)[0][:40]
             if c.execute("SELECT 1 FROM designs WHERE code=?", (code,)).fetchone():
                 continue
-            fn = store_image(os.path.join(folder, f))
+            try:
+                fn = store_image(full)
+            except Exception:
+                continue
             c.execute("INSERT INTO designs(code,name,category,width,height,descr,image,price) VALUES(?,?,?,?,?,?,?,0)",
                       (code, code, "Άλλο", "", "", "", fn))
             n += 1

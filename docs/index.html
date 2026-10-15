@@ -3,343 +3,300 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AlumilOffers — Προσφορές αλουμινάδων σε ένα λεπτό</title>
-<meta name="description" content="Δωρεάν εφαρμογή Windows για αλουμινάδες: dashboard τζίρου, κατάλογος σχεδίων με μέτρα, προσφορά σε μία οθόνη και επαγγελματικό PDF με ΦΠΑ και λογότυπο. Χωρίς συνδρομή, χωρίς ίντερνετ.">
+<title>AlumilOffers — Προσφορά αλουμινάδων σε 1 λεπτό</title>
+<meta name="description" content="Δωρεάν πρόγραμμα Windows για αλουμινάδες: κατάλογος σχεδίων, προσφορά σε μία οθόνη, ΦΠΑ αυτόματα, PDF με λογότυπο. Offline, χωρίς συνδρομή.">
+<meta property="og:title" content="AlumilOffers — η προσφορά έτοιμη πριν κλείσεις το τηλέφωνο">
+<meta property="og:description" content="Σχέδια με μέτρα, υλικά ανά κατασκευή, ΦΠΑ αυτόματα, PDF με λογότυπο. Δωρεάν, offline.">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#101828">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23C2410C'/%3E%3Cpath d='M9 8h14v3H9zM9 14h14v3H9zM9 20h9v3H9z' fill='white'/%3E%3C/svg%3E">
 <style>
 :root{
-  --ink:#0a1128; --ink2:#0e1a3d; --card:#101f4b;
-  --blue:#2f6bff; --cyan:#38bdf8; --lime:#4ade80;
-  --paper:#f5f7fc; --white:#ffffff; --txt:#16213c; --muted:#5b6b8c;
-  --line:#e3e9f4; --radius:20px;
-  --grad:linear-gradient(120deg,#2f6bff,#38bdf8);
-  --shadow-lg:0 30px 80px -30px rgba(10,17,40,.45);
-  --shadow-md:0 16px 40px -18px rgba(10,17,40,.25);
+  --font-display:"Franklin Gothic Medium","Arial Narrow",Arial,"Segoe UI",system-ui,sans-serif;
+  --font-text:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;
+  --font-mono:Consolas,"Cascadia Mono",monospace;
+  --step--1:.8rem; --step-0:1rem; --step-1:1.25rem; --step-2:1.563rem;
+  --step-3:1.953rem; --step-4:2.75rem; --step-5:3.6rem;
+  --space-3xs:.25rem; --space-2xs:.5rem; --space-xs:.75rem; --space-s:1rem;
+  --space-m:1.5rem; --space-l:2rem; --space-xl:3rem; --space-2xl:4.5rem;
+  --base:#FAFAF7; --surface:#fff; --ink:#101828; --ink-2:#344054; --ink-3:#667085;
+  --line:#E4E7EC; --steel:#0369A1; --accent:#C2410C; --accent-hot:#EA580C;
+  --radius:10px; --border:1px solid var(--line);
+  --shadow-near:0 1px 2px rgba(16,24,40,.12);
+  --shadow-far:0 24px 48px -16px rgba(16,24,40,.28);
+  --dur-fast:120ms; --dur:220ms; --dur-slow:420ms;
+  --ease:cubic-bezier(.2,0,0,1); --ease-out:cubic-bezier(.16,1,.3,1);
 }
 *{margin:0;padding:0;box-sizing:border-box}
 html{scroll-behavior:smooth}
-body{font-family:"Segoe UI",system-ui,-apple-system,"Helvetica Neue",Roboto,Arial,sans-serif;background:var(--ink);color:#eef2fa;line-height:1.65;-webkit-font-smoothing:antialiased;overflow-x:hidden}
-.wrap{max-width:1180px;margin:0 auto;padding:0 26px}
-a{text-decoration:none}
-/* ================= NAV ================= */
-.nav{position:fixed;inset:0 0 auto 0;z-index:60;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);background:rgba(8,14,34,.72);border-bottom:1px solid rgba(255,255,255,.07)}
-.nav-in{max-width:1180px;margin:0 auto;padding:15px 26px;display:flex;align-items:center;gap:30px}
-.logo{display:flex;align-items:center;gap:11px;color:#fff;font-weight:800;font-size:19px;letter-spacing:-.2px}
-.logo-mark{width:34px;height:34px;border-radius:10px;background:var(--grad);display:flex;align-items:center;justify-content:center;box-shadow:0 6px 18px -6px rgba(47,107,255,.8)}
-.links{display:flex;gap:26px;margin-left:auto}
-.links a{color:#aeb9d4;font-size:14.5px;font-weight:600;transition:color .2s}
-.links a:hover{color:#fff}
-.btn{display:inline-flex;align-items:center;gap:9px;font-weight:800;border-radius:13px;padding:14px 28px;font-size:16px;border:0;cursor:pointer;transition:transform .16s ease,box-shadow .16s ease,background .16s}
-.btn:hover{transform:translateY(-2px)}
-.btn-lime{background:linear-gradient(120deg,#22c55e,#4ade80);color:#06230f;box-shadow:0 12px 30px -10px rgba(74,222,128,.55)}
-.btn-ghost{background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.2)}
-.btn-blue{background:var(--grad);color:#fff;box-shadow:0 12px 30px -10px rgba(47,107,255,.6)}
-.btn-sm{padding:10px 20px;font-size:14px;border-radius:10px}
-.burger{display:none;background:none;border:0;color:#fff;font-size:26px;cursor:pointer}
-/* ================= HERO ================= */
-.hero{position:relative;padding:158px 0 110px;overflow:hidden;background:radial-gradient(900px 480px at 88% -8%,rgba(47,107,255,.35),transparent 60%),radial-gradient(760px 420px at -6% 22%,rgba(56,189,248,.22),transparent 55%),linear-gradient(180deg,#0a1128,#0a1330 75%)}
-.hero::before{content:"";position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.045) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.045) 1px,transparent 1px);background-size:56px 56px;mask-image:radial-gradient(760px 520px at 50% 0%,#000 30%,transparent 75%);pointer-events:none}
-.hero-grid{position:relative;display:grid;grid-template-columns:1fr 1.08fr;gap:64px;align-items:center}
-.pill{display:inline-flex;align-items:center;gap:9px;font-size:13.5px;font-weight:700;color:#a7f3d0;background:rgba(74,222,128,.1);border:1px solid rgba(74,222,128,.35);border-radius:999px;padding:8px 18px;margin-bottom:24px}
-.pill .pulse{width:8px;height:8px;border-radius:50%;background:#4ade80;box-shadow:0 0 0 0 rgba(74,222,128,.7);animation:pl 2s infinite}
-@keyframes pl{70%{box-shadow:0 0 0 10px rgba(74,222,128,0)}100%{box-shadow:0 0 0 0 rgba(74,222,128,0)}}
-h1{font-size:clamp(36px,5.2vw,62px);line-height:1.08;font-weight:900;letter-spacing:-1.5px}
-h1 .grad{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
-.sub{color:#b9c4dd;font-size:19px;margin:24px 0 34px;max-width:540px}
-.cta{display:flex;gap:14px;flex-wrap:wrap}
-.proof{display:flex;gap:26px;flex-wrap:wrap;margin-top:34px}
-.proof div{display:flex;gap:9px;align-items:center;color:#8e9bb8;font-size:14px;font-weight:600}
-.proof svg{flex-shrink:0}
-/* ---- app window mock ---- */
-.win{background:#0d1836;border:1px solid rgba(255,255,255,.1);border-radius:22px;box-shadow:var(--shadow-lg);overflow:hidden;transform:perspective(1400px) rotateY(-7deg) rotateX(2deg);transition:transform .5s ease}
-.win:hover{transform:perspective(1400px) rotateY(0) rotateX(0)}
-.win-bar{display:flex;align-items:center;gap:8px;padding:14px 18px;background:rgba(255,255,255,.05);border-bottom:1px solid rgba(255,255,255,.07)}
-.dot{width:11px;height:11px;border-radius:50%}
-.win-url{margin-left:10px;flex:1;background:rgba(255,255,255,.07);border-radius:8px;font-size:12px;color:#8e9bb8;padding:5px 14px}
-.win-body{display:grid;grid-template-columns:172px 1fr;min-height:380px}
-.side{background:rgba(255,255,255,.03);border-right:1px solid rgba(255,255,255,.07);padding:18px 12px;display:flex;flex-direction:column;gap:6px}
-.side .slogo{color:#fff;font-weight:800;font-size:14px;padding:4px 10px 14px}
-.sitem{display:flex;align-items:center;gap:9px;font-size:13px;font-weight:700;color:#8e9bb8;border-radius:9px;padding:9px 11px}
-.sitem.on{background:rgba(47,107,255,.28);color:#fff}
-.sitem.cta{background:linear-gradient(120deg,#22c55e,#4ade80);color:#06230f;margin-top:8px;justify-content:center}
-.dash{padding:20px;display:flex;flex-direction:column;gap:12px}
-.dstats{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.dstat{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.09);border-radius:13px;padding:13px 15px}
-.dstat b{display:block;font-size:20px;letter-spacing:-.5px}
-.dstat small{color:#8e9bb8;font-size:11.5px;font-weight:600}
-.dbars{display:flex;flex-direction:column;gap:8px}
-.dbar{display:flex;align-items:center;gap:10px;font-size:11px;color:#8e9bb8;font-weight:700}
-.dbar .tr{flex:1;height:8px;border-radius:6px;background:rgba(255,255,255,.1);overflow:hidden}
-.dbar .fl{height:100%;border-radius:6px;background:var(--grad)}
-.drow{display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.07);border-radius:11px;padding:10px 14px;font-size:12.5px}
-.drow .tag{background:var(--blue);border-radius:7px;padding:3px 13px;font-size:11px;font-weight:800}
-/* ================= MARQUEE STRIP ================= */
-.strip{background:#fff;color:var(--txt);border-bottom:1px solid var(--line)}
-.strip-in{max-width:1180px;margin:0 auto;padding:30px 26px;display:grid;grid-template-columns:repeat(4,1fr);gap:12px;text-align:center}
-.strip b{font-size:30px;display:block;letter-spacing:-1px;color:var(--ink)}
-.strip span{color:var(--muted);font-size:13.5px;font-weight:600}
-/* ================= LIGHT SECTIONS ================= */
-.light{background:var(--paper);color:var(--txt)}
-section{padding:96px 0}
-.eyebrow{display:inline-flex;align-items:center;gap:10px;color:var(--blue);font-weight:800;font-size:13px;letter-spacing:2.5px;text-transform:uppercase}
-.eyebrow::before{content:"";width:26px;height:3px;border-radius:2px;background:var(--grad)}
-h2{font-size:clamp(29px,4vw,44px);font-weight:900;letter-spacing:-1px;margin:12px 0 14px;color:var(--ink)}
-.lead{color:var(--muted);font-size:18px;max-width:660px}
-.fgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;margin-top:46px}
-.fcard{background:var(--white);border:1px solid var(--line);border-radius:var(--radius);padding:32px 28px;box-shadow:0 10px 34px -22px rgba(10,17,40,.35);transition:transform .22s,box-shadow .22s;position:relative;overflow:hidden}
-.fcard::before{content:"";position:absolute;top:0;left:0;right:0;height:4px;background:var(--grad);opacity:0;transition:opacity .22s}
-.fcard:hover{transform:translateY(-6px);box-shadow:var(--shadow-md)}
-.fcard:hover::before{opacity:1}
-.fcard .tile{width:54px;height:54px;border-radius:15px;background:linear-gradient(135deg,#e8efff,#d5e5ff);display:flex;align-items:center;justify-content:center;margin-bottom:18px}
-.fcard h3{font-size:19px;margin-bottom:9px;letter-spacing:-.3px}
-.fcard p{color:var(--muted);font-size:15px}
+body{font-family:var(--font-text);background:var(--base);color:var(--ink);line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+::selection{background:#FED7AA}
+.wrap{max-width:1120px;margin:0 auto;padding:0 var(--space-m)}
+.skip{position:absolute;left:-9999px;top:0;background:var(--ink);color:#fff;padding:var(--space-xs) var(--space-s);border-radius:0 0 var(--radius) 0;z-index:200;font-weight:700}
+.skip:focus{left:0}
+:focus-visible{outline:3px solid var(--steel);outline-offset:2px;border-radius:4px}
+/* utility bar */
+.util{background:var(--ink);color:#D0D5DD;font-size:.78rem;font-weight:600}
+.util-in{max-width:1120px;margin:0 auto;padding:.45rem var(--space-m);display:flex;gap:var(--space-m);justify-content:center;flex-wrap:wrap}
+.util b{color:#fff}
+/* nav */
+.nav{position:sticky;top:0;z-index:90;background:rgba(250,250,247,.92);backdrop-filter:blur(12px);border-bottom:var(--border)}
+.nav-in{max-width:1120px;margin:0 auto;padding:.7rem var(--space-m);display:flex;align-items:center;gap:var(--space-s)}
+.brand{display:flex;align-items:center;gap:var(--space-2xs);font-family:var(--font-display);font-weight:700;font-size:1.15rem;letter-spacing:.02em;text-decoration:none}
+.brand-mark{width:32px;height:32px;border-radius:var(--radius);background:var(--accent);display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
+.links{display:flex;gap:var(--space-xs);margin-left:auto;list-style:none}
+.links a{color:var(--ink-2);font-size:.92rem;font-weight:600;text-decoration:none;padding:.55rem .8rem;border-radius:var(--radius);min-height:44px;display:inline-flex;align-items:center}
+.links a:hover{color:var(--ink);background:#F2F4F7}
+.menu{display:none;background:none;border:var(--border);border-radius:var(--radius);min-width:44px;min-height:44px;font-size:1.15rem;cursor:pointer;color:var(--ink)}
+/* buttons: rest/hover/active/focus/disabled */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:var(--space-2xs);font-family:var(--font-display);font-weight:700;letter-spacing:.02em;font-size:1rem;border-radius:var(--radius);padding:.95rem 1.6rem;min-height:52px;border:2px solid transparent;cursor:pointer;text-decoration:none;transition:transform var(--dur) var(--ease),background var(--dur) var(--ease),box-shadow var(--dur) var(--ease)}
+.btn-fire{background:var(--accent);color:#fff;box-shadow:var(--shadow-near)}
+.btn-fire:hover{background:#9A3412;transform:translateY(-2px);box-shadow:var(--shadow-far)}
+.btn-fire:hover .arr{transform:translateX(4px)}
+.btn-fire:active{transform:translateY(0) scale(.98)}
+.arr{display:inline-block;transition:transform var(--dur) var(--ease)}
+.btn-line{background:var(--surface);color:var(--ink);border-color:var(--ink)}
+.btn-line:hover{background:var(--ink);color:#fff;transform:translateY(-2px)}
+.btn-line:active{transform:scale(.98)}
+.btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.btn-sm{padding:.6rem 1rem;font-size:.82rem;min-height:44px}
+/* hero */
+.hero{border-bottom:var(--border);background:linear-gradient(#fff, var(--base))}
+.hero-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:var(--space-xl);align-items:center;padding:var(--space-2xl) 0 var(--space-xl)}
+.kicker{display:inline-flex;align-items:center;gap:var(--space-2xs);font-family:var(--font-display);font-size:.78rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);border:2px solid var(--accent);border-radius:var(--radius);padding:.35rem .8rem;margin-bottom:var(--space-s);background:#FFF7ED}
+h1{font-family:var(--font-display);font-size:clamp(2.4rem,5vw,3.9rem);line-height:1.04;letter-spacing:-.015em;text-wrap:balance}
+h1 .u{box-shadow:inset 0 -.28em 0 #FED7AA}
+.sub{color:var(--ink-2);font-size:1.12rem;margin:var(--space-s) 0 var(--space-m);max-width:32rem}
+.cta{display:flex;gap:var(--space-xs);flex-wrap:wrap}
+.meta{display:flex;gap:var(--space-m);flex-wrap:wrap;margin-top:var(--space-m);list-style:none}
+.meta li{display:flex;gap:var(--space-2xs);align-items:center;font-size:.88rem;font-weight:600;color:var(--ink-2)}
+.stars{color:var(--accent);letter-spacing:.1em}
+.avatars{display:flex}
+.avatars span{width:32px;height:32px;border-radius:50%;background:var(--ink);color:#fff;font-size:.72rem;font-weight:800;display:inline-flex;align-items:center;justify-content:center;border:2px solid var(--base);margin-left:-8px}
+.avatars span:first-child{margin-left:0}
+.avatars span:nth-child(2){background:var(--steel)} .avatars span:nth-child(3){background:var(--accent)}
+/* paper mock */
+.stage{position:relative}
+.blueprint{position:absolute;inset:8% -4% -6% 10%;background:#0C4A6E;border-radius:var(--radius);background-image:linear-gradient(rgba(255,255,255,.14) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.14) 1px,transparent 1px);background-size:26px 26px;transform:rotate(2.5deg)}
+.paper{position:relative;background:var(--surface);border:2px solid var(--ink);border-radius:var(--radius);box-shadow:var(--shadow-far);padding:var(--space-m);transition:transform var(--dur-slow) var(--ease-out)}
+.stage:hover .paper{transform:rotate(-.6deg) translateY(-3px)}
+.paper::before,.paper::after{content:"";position:absolute;top:-12px;width:72px;height:22px;background:rgba(254,215,170,.85);border:1px solid #FDBA74;border-radius:2px}
+.paper::before{left:24px;transform:rotate(-4deg)}
+.paper::after{right:24px;transform:rotate(4deg)}
+.dim{display:inline-block;font-size:.7rem;font-weight:800;letter-spacing:.06em;background:#EFF6FF;color:var(--steel);border:1px dashed var(--steel);border-radius:8px;padding:.1rem .5rem;margin-left:.4rem;vertical-align:middle}
+.chip{position:absolute;background:var(--surface);border:2px solid var(--ink);border-radius:var(--radius);box-shadow:var(--shadow-near);padding:.5rem .8rem;font-size:.8rem;font-weight:800;display:flex;gap:.45rem;align-items:center;z-index:2}
+.chip small{display:block;font-size:.68rem;color:var(--ink-3);font-weight:600}
+.chip-1{top:6%;left:-34px;transform:rotate(-3deg)}
+.chip-2{bottom:10%;right:-28px;transform:rotate(2deg)}
+.chip .dotg{width:10px;height:10px;border-radius:50%;background:#16A34A;flex-shrink:0}
+.paper-top{display:flex;gap:var(--space-s);align-items:center;border-bottom:3px solid var(--ink);padding-bottom:var(--space-s);margin-bottom:var(--space-s)}
+.shop{width:46px;height:46px;border-radius:var(--radius);background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:700;font-size:1.3rem;flex-shrink:0}
+.paper table{width:100%;border-collapse:collapse;font-size:.86rem;margin:var(--space-s) 0}
+.paper th{text-align:left;font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);border-bottom:2px solid var(--ink);padding:.4rem .5rem}
+.paper td{border-bottom:var(--border);padding:.55rem .5rem;font-variant-numeric:tabular-nums}
+.paper td:last-child,.paper th:last-child{text-align:right}
+.ptotal{display:flex;justify-content:space-between;align-items:center;background:var(--ink);color:#fff;border-radius:var(--radius);padding:.8rem 1.1rem;font-family:var(--font-display);font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+.ptotal output{font-size:1.4rem;font-variant-numeric:tabular-nums}
+.stamp{position:absolute;top:-14px;right:18px;background:var(--accent);color:#fff;font-family:var(--font-display);font-size:.75rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:.35rem .8rem;border-radius:var(--radius);transform:rotate(3deg)}
+/* trades strip */
+.strip{background:var(--surface);border-bottom:var(--border)}
+.strip-in{max-width:1120px;margin:0 auto;padding:var(--space-s) var(--space-m);display:flex;gap:var(--space-m);align-items:center;flex-wrap:wrap;font-size:.82rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
+.strip-in b{color:var(--ink)}
+/* sections */
+section.block{padding:var(--space-2xl) 0}
+.eyebrow{font-family:var(--font-display);font-size:.78rem;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--accent)}
+h2{font-family:var(--font-display);font-size:clamp(1.6rem,3vw,2.3rem);line-height:1.1;letter-spacing:-.01em;margin:.4rem 0 .5rem;text-wrap:balance}
+.lead{color:var(--ink-2);font-size:1.05rem;max-width:40rem}
+.feat{margin-top:var(--space-l);border-top:3px solid var(--ink);list-style:none}
+.feat li{display:grid;grid-template-columns:72px 1fr 1fr;gap:var(--space-m);padding:var(--space-m) var(--space-xs);border-bottom:var(--border);border-radius:8px;transition:background var(--dur) var(--ease)}
+.feat li:hover{background:#fff}
+.feat .n{font-family:var(--font-display);font-size:2rem;color:var(--accent);line-height:1}
+.feat h3{font-family:var(--font-display);font-size:1.08rem;margin-bottom:.25rem}
+.feat p{color:var(--ink-2);font-size:.95rem}
+.feat .tag{display:inline-block;font-size:.72rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;background:#F2F4F7;border-radius:8px;padding:.2rem .6rem;margin-bottom:.4rem;color:var(--ink-2)}
 /* steps */
-.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;margin-top:46px}
-.step{background:var(--ink);color:#fff;border-radius:var(--radius);padding:36px 30px;position:relative;overflow:hidden}
-.step::after{content:"";position:absolute;left:0;right:0;bottom:0;height:5px;background:var(--grad)}
-.step .n{font-size:15px;font-weight:800;color:var(--cyan);letter-spacing:2px}
-.step h3{font-size:22px;margin:8px 0 10px;letter-spacing:-.4px}
-.step p{color:#aeb9d4;font-size:15px}
-.step .big{position:absolute;right:14px;top:6px;font-size:110px;font-weight:900;color:rgba(255,255,255,.06);line-height:1}
-/* pdf */
-.pdfzone{display:grid;grid-template-columns:1.05fr .95fr;gap:56px;margin-top:46px;align-items:start}
-.sheet{background:#fff;border-radius:14px;box-shadow:var(--shadow-lg);border:1px solid var(--line);padding:38px 40px;color:var(--txt);font-size:13px;transform:rotate(-1.2deg);transition:transform .4s}
-.sheet:hover{transform:rotate(0)}
-.sheet .ph{display:flex;gap:15px;align-items:center;border-bottom:3px solid var(--blue);padding-bottom:15px;margin-bottom:15px}
-.mono{width:58px;height:58px;border-radius:14px;background:linear-gradient(135deg,#0a1128,#2f6bff);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:24px;flex-shrink:0}
-.sheet table{width:100%;border-collapse:collapse;margin:14px 0;font-size:12.5px}
-.sheet th{background:#0a1128;color:#fff;padding:9px 10px;text-align:left;font-size:12px}
-.sheet th:first-child{border-radius:8px 0 0 0}.sheet th:last-child{border-radius:0 8px 0 0}
-.sheet td{border:1px solid var(--line);padding:8px 10px}
-.sheet tr:nth-child(even) td{background:#eff4ff}
-.dcard{border:1px solid var(--line);border-radius:11px;display:flex;gap:14px;padding:13px;margin-top:13px;align-items:center;background:#fbfcff}
-.dimg{width:92px;height:68px;border-radius:9px;background:linear-gradient(135deg,#dbe7ff,#bcd4ff);display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.tot{background:linear-gradient(120deg,#1a56db,#2f6bff);color:#fff;border-radius:11px;display:flex;justify-content:space-between;padding:13px 20px;font-weight:900;margin-top:14px;font-size:15px}
-.check{display:flex;gap:16px;background:#fff;border:1px solid var(--line);border-radius:16px;padding:22px;margin-bottom:16px;box-shadow:0 10px 30px -24px rgba(10,17,40,.4)}
-.check .ok{width:44px;height:44px;border-radius:50%;background:#e7f8ee;color:#16a34a;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.check h3{font-size:17px;margin-bottom:5px}
-.check p{color:var(--muted);font-size:14.5px}
+.how{background:var(--surface);border-top:var(--border);border-bottom:var(--border)}
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin-top:var(--space-l);border:2px solid var(--ink);border-radius:var(--radius);overflow:hidden}
+.step{padding:var(--space-l);position:relative;overflow:hidden}
+.step+.step{border-left:2px solid var(--ink)}
+.step .bg{position:absolute;right:8px;top:-14px;font-family:var(--font-display);font-size:5.2rem;font-weight:700;color:#F2F4F7;line-height:1;pointer-events:none}
+.step .k{position:relative;font-family:var(--font-display);font-size:.75rem;font-weight:700;letter-spacing:.14em;color:var(--surface);background:var(--ink);display:inline-block;padding:.25rem .7rem;border-radius:8px;margin-bottom:var(--space-xs)}
+.step h3{font-family:var(--font-display);font-size:1.2rem;margin-bottom:.35rem}
+.step p{color:var(--ink-2);font-size:.94rem}
+/* estimator */
+.split{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-l);margin-top:var(--space-l);align-items:start}
+.panel{background:var(--surface);border:2px solid var(--ink);border-radius:var(--radius);box-shadow:var(--shadow-near)}
+.panel-h{padding:var(--space-s) var(--space-m);border-bottom:2px solid var(--ink);font-family:var(--font-display);font-weight:700;text-transform:uppercase;letter-spacing:.05em;display:flex;justify-content:space-between;align-items:center}
+.prow{display:grid;grid-template-columns:1fr 84px 110px;gap:var(--space-2xs);padding:var(--space-xs) var(--space-m);border-bottom:var(--border);align-items:end}
+.prow label{font-size:.75rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);display:block;margin-bottom:2px}
+.prow input,.panel select{font:inherit;width:100%;padding:.65rem .7rem;border:2px solid var(--line);border-radius:8px;background:var(--base);min-height:48px}
+.prow input:focus,.panel select:focus{border-color:var(--steel);outline:3px solid rgba(3,105,161,.25);outline-offset:1px}
+.prow .line{font-size:.85rem;font-weight:700}
+.bill{padding:var(--space-s) var(--space-m);display:grid;gap:.3rem;font-variant-numeric:tabular-nums}
+.bill div{display:flex;justify-content:space-between;color:var(--ink-2);font-size:.95rem}
+.bill .grand{font-family:var(--font-display);font-size:1.5rem;color:#fff;background:var(--accent);border-radius:8px;padding:.55rem .9rem;margin-top:.4rem}
+.bill .grand output{font-size:1.6rem}
+.minirow{display:flex;gap:var(--space-2xs);padding:var(--space-xs) var(--space-m) var(--space-s)}
+.linkbtn{background:none;border:0;color:var(--steel);font-weight:800;font-size:.85rem;cursor:pointer;padding:.6rem .4rem;min-height:44px;border-radius:8px;text-decoration:underline;text-underline-offset:3px}
+/* testimonial */
+.quote{margin-top:var(--space-l);background:var(--surface);border:2px solid var(--ink);border-radius:var(--radius);padding:var(--space-l);display:grid;grid-template-columns:64px 1fr;gap:var(--space-m);align-items:start;box-shadow:var(--shadow-near)}
+.qface{width:64px;height:64px;border-radius:50%;background:var(--steel);color:#fff;font-weight:800;font-size:1.2rem;display:flex;align-items:center;justify-content:center}
+.quote blockquote{font-size:1.12rem;line-height:1.55}
+.quote figcaption{margin-top:var(--space-2xs);color:var(--ink-3);font-size:.88rem;font-weight:600}
+/* progress + sticky cta */
+.progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:120}
+.sticky-cta{display:none}
+.ticks{list-style:none;display:grid;gap:var(--space-xs);margin-top:var(--space-s)}
+.ticks li{display:flex;gap:var(--space-xs);align-items:flex-start;background:var(--surface);border:var(--border);border-radius:var(--radius);padding:var(--space-s) var(--space-m);box-shadow:var(--shadow-near)}
+.tick{width:30px;height:30px;border-radius:8px;background:#ECFDF5;color:#047857;font-weight:900;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
+.ticks h3{font-size:.98rem} .ticks p{color:var(--ink-2);font-size:.9rem}
 /* download */
-.dl{background:linear-gradient(140deg,#0a1330,#17307a);border:1px solid rgba(255,255,255,.1);border-radius:26px;padding:60px 56px;display:grid;grid-template-columns:1fr 1fr;gap:44px;align-items:center;color:#fff;box-shadow:var(--shadow-lg);position:relative;overflow:hidden}
-.dl::before{content:"";position:absolute;width:480px;height:480px;border-radius:50%;background:radial-gradient(circle,rgba(56,189,248,.25),transparent 65%);top:-200px;right:-140px}
-.code{position:relative;background:#050b1d;border:1px solid rgba(255,255,255,.12);border-radius:15px;padding:24px;font-family:Consolas,"Courier New",monospace;font-size:14.5px;color:#a5f3fc;overflow-x:auto;line-height:1.9}
-.code .c{color:#5b6b8c}
+.dl{background:var(--ink);color:#fff;border-radius:var(--radius);padding:var(--space-xl);display:grid;grid-template-columns:1fr 1fr;gap:var(--space-l);align-items:center}
+.dl h2{color:#fff}
+.dl p{color:#D0D5DD}
+.req{list-style:none;margin:var(--space-s) 0;display:grid;gap:.35rem;color:#D0D5DD;font-size:.92rem}
+.req li{display:flex;gap:.5rem}
+.code{background:#000;border:1px solid #344054;border-radius:var(--radius);padding:var(--space-m);font-family:var(--font-mono);font-size:.88rem;color:#BAE6FD;overflow-x:auto;line-height:1.9}
 /* faq */
-.faq{background:#fff;border:1px solid var(--line);border-radius:15px;margin-top:14px;overflow:hidden}
-.faq button{width:100%;background:none;border:0;text-align:left;padding:21px 26px;font-size:16.5px;font-weight:800;color:var(--ink);cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:14px;font-family:inherit}
-.faq .a{max-height:0;overflow:hidden;transition:max-height .32s ease}
-.faq .a p{padding:0 26px 24px;color:var(--muted);font-size:15px}
-.faq.open .a{max-height:260px}
-.faq .pm{color:var(--blue);font-size:24px;font-weight:900;flex-shrink:0}
-/* footer */
-footer{background:#070d20;border-top:1px solid rgba(255,255,255,.07);padding:46px 0;color:#8e9bb8;font-size:14px}
-.foot{display:flex;gap:18px;align-items:center;justify-content:space-between;flex-wrap:wrap}
-footer a{color:#cdd6ec;font-weight:600}
-footer a:hover{color:#fff}
-/* reveal */
-.rv{opacity:0;transform:translateY(28px);transition:opacity .7s ease,transform .7s ease}
+.faqbox{max-width:800px;margin-top:var(--space-s)}
+details{background:var(--surface);border:var(--border);border-radius:var(--radius);margin-bottom:var(--space-2xs)}
+details[open]{border-color:var(--ink);box-shadow:var(--shadow-near)}
+summary{list-style:none;cursor:pointer;padding:1rem 1.2rem;font-weight:800;display:flex;justify-content:space-between;align-items:center;gap:var(--space-s);min-height:56px}
+summary::-webkit-details-marker{display:none}
+summary .pm{background:#F2F4F7;border-radius:8px;min-width:32px;height:32px;display:inline-flex;align-items:center;justify-content:center;color:var(--accent);font-size:1.1rem;transition:transform var(--dur) var(--ease)}
+details[open] .pm{transform:rotate(45deg)}
+details p{padding:0 1.2rem 1.1rem;color:var(--ink-2);font-size:.95rem}
+footer{background:var(--ink);color:#98A2B3;padding:var(--space-l) 0;font-size:.88rem}
+.foot{max-width:1120px;margin:0 auto;padding:0 var(--space-m);display:flex;gap:var(--space-s);justify-content:space-between;flex-wrap:wrap;align-items:center}
+footer a{color:#EAECF0;text-decoration:none;font-weight:600} footer a:hover{text-decoration:underline}
+.rv{opacity:0;transform:translateY(18px);transition:opacity var(--dur-slow) var(--ease-out),transform var(--dur-slow) var(--ease-out)}
 .rv.vis{opacity:1;transform:none}
-@media(max-width:960px){
-  .hero-grid,.pdfzone,.dl{grid-template-columns:1fr}
-  .fgrid,.steps{grid-template-columns:1fr}
-  .strip-in{grid-template-columns:1fr 1fr;gap:20px}
-  .links{display:none;position:absolute;top:100%;left:0;right:0;background:#0a1330;flex-direction:column;padding:18px 26px;gap:16px;border-bottom:1px solid rgba(255,255,255,.08)}
-  .links.open{display:flex}
-  .burger{display:block}
-  #navCta{display:none}
-  .win{transform:none}
-  section{padding:66px 0}
-  .dl{padding:40px 28px}
-  .sheet{transform:none;padding:26px 22px}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}.progress{display:none}html{scroll-behavior:auto}.rv{opacity:1;transform:none}}
+@media(max-width:940px){
+  .hero-grid,.split,.dl{grid-template-columns:1fr}
+  .feat li{grid-template-columns:52px 1fr} .feat li p{grid-column:2}
+  .steps{grid-template-columns:1fr} .step+.step{border-left:0;border-top:2px solid var(--ink)}
+  .links{display:none;position:absolute;top:100%;left:0;right:0;background:var(--surface);flex-direction:column;padding:var(--space-xs) var(--space-m);border-bottom:var(--border);margin:0}
+  .links.open{display:flex} .menu{display:inline-flex;align-items:center;justify-content:center;margin-left:auto}
+  #navCta{display:none} section.block{padding:var(--space-xl) 0}
+  .prow{grid-template-columns:1fr 72px 96px}
+  .chip-1{left:6px} .chip-2{right:6px}
+  .quote{grid-template-columns:1fr}
+  .sticky-cta{display:flex;position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));z-index:110;background:var(--ink);border-radius:var(--radius);padding:.6rem;box-shadow:var(--shadow-far)}
+  .sticky-cta a{flex:1}
+  body{padding-bottom:0}
 }
 </style>
 </head>
 <body>
+<div class="progress" id="progress" aria-hidden="true"></div>
+<a class="skip" href="#main">Μετάβαση στο περιεχόμενο</a>
+<div class="util"><div class="util-in"><span><b>100% offline</b> — τίποτα δεν ανεβαίνει πουθενά</span><span><b>Δωρεάν MIT</b> — χωρίς συνδρομή</span><span><b>Windows 10/11</b> — κανονικό setup</span></div></div>
+<nav class="nav" aria-label="Κύρια πλοήγηση"><div class="nav-in">
+<a class="brand" href="#top"><span class="brand-mark" aria-hidden="true"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6"><path d="M4 6h16M4 11h16M4 16h10M4 21h7"/></svg></span>AlumilOffers</a>
+<ul class="links" id="navLinks"><li><a href="#features">Τι κάνει</a></li><li><a href="#how">Βήματα</a></li><li><a href="#pdf">PDF</a></li><li><a href="#calc">Κοστολόγηση</a></li><li><a href="#download">Εγκατάσταση</a></li><li><a href="#faq">Ερωτήσεις</a></li></ul>
+<a href="#download" class="btn btn-fire btn-sm" id="navCta">Κατέβασμα</a>
+<button class="menu" id="burger" aria-expanded="false" aria-controls="navLinks" aria-label="Άνοιγμα μενού">☰</button>
+</div></nav>
 
-<nav>
-  <div class="nav-in">
-    <a class="logo" href="#"><span class="logo-mark"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="1.5"/><line x1="12" y1="3" x2="12" y2="21"/><line x1="4" y1="12" x2="12" y2="12"/></svg></span>AlumilOffers</a>
-    <div class="links" id="navLinks">
-      <a href="#features">Χαρακτηριστικά</a>
-      <a href="#how">Πώς δουλεύει</a>
-      <a href="#pdf">Το PDF</a>
-      <a href="#download">Εγκατάσταση</a>
-      <a href="#faq">Ερωτήσεις</a>
-    </div>
-    <a href="#download" class="btn btn-lime btn-sm" style="margin-left:auto" id="navCta">Εγκατάσταση</a>
-    <button class="burger" id="burger" aria-label="Μενού">☰</button>
-  </div>
-</nav>
-
-<header class="hero">
-  <div class="wrap hero-grid">
-    <div>
-      <div class="pill"><span class="pulse"></span>Δωρεάν · Offline · Για αλουμινάδες</div>
-      <h1>Η προσφορά έτοιμη <span class="grad">πριν κλείσεις</span> το τηλέφωνο.</h1>
-      <p class="sub">Σχέδια με μέτρα, υλικά ανά κατασκευή, ΦΠΑ αυτόματα και PDF με το λογότυπό σου — όλα σε μία οθόνη, χωρίς συνδρομή, χωρίς ίντερνετ.</p>
-      <div class="cta">
-        <a class="btn btn-lime" href="https://github.com/0x-Shadow/AlumilOffers_platform/releases"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Εγκατάσταση για Windows</a>
-        <a class="btn btn-ghost" href="https://github.com/0x-Shadow/AlumilOffers_platform">Ανοιχτός κώδικας</a>
-      </div>
-      <div class="proof">
-        <div><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Χωρίς συνδρομή</div>
-        <div><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Δεδομένα μόνο στον υπολογιστή σου</div>
-        <div><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Οδηγός εγκατάστασης βήμα-βήμα</div>
-      </div>
-    </div>
-    <div class="win" aria-hidden="true">
-      <div class="win-bar"><span class="dot" style="background:#f87171"></span><span class="dot" style="background:#fbbf24"></span><span class="dot" style="background:#4ade80"></span><span class="win-url">AluminaOffers — Αρχική</span></div>
-      <div class="win-body">
-        <div class="side">
-          <div class="slogo">◆ Η Επωνυμία σου</div>
-          <div class="sitem on">⌂&nbsp; Αρχική</div>
-          <div class="sitem">✚&nbsp; Νέα Προσφορά</div>
-          <div class="sitem">▤&nbsp; Κατάλογος</div>
-          <div class="sitem">⚙&nbsp; Στοιχεία</div>
-          <div class="sitem cta">＋ ΝΕΑ ΠΡΟΣΦΟΡΑ</div>
-        </div>
-        <div class="dash">
-          <div class="dstats">
-            <div class="dstat"><b>4.280,00 €</b><small>Τζίρος μήνα (με ΦΠΑ)</small></div>
-            <div class="dstat"><b>9</b><small>Προσφορές μήνα</small></div>
-          </div>
-          <div class="dbars">
-            <div class="dbar"><span>ΟΚΤ</span><div class="tr"><div class="fl" style="width:84%"></div></div></div>
-            <div class="dbar"><span>ΣΕΠ</span><div class="tr"><div class="fl" style="width:62%"></div></div></div>
-            <div class="dbar"><span>ΑΥΓ</span><div class="tr"><div class="fl" style="width:40%"></div></div></div>
-          </div>
-          <div class="drow"><span>Γιώργος Π. · 2.232,00 € · 2 σχέδια</span><span class="tag">PDF</span></div>
-          <div class="drow"><span>Μαρία Κ. · 1.488,00 €</span><span class="tag">PDF</span></div>
-        </div>
-      </div>
-    </div>
-  </div>
-</header>
-
-<div class="strip">
-  <div class="strip-in">
-    <div><b data-count="1">1</b><span>οθόνη για όλη την προσφορά</span></div>
-    <div><b data-count="200">200+</b><span>σχέδια χωράνε στον κατάλογο</span></div>
-    <div><b>24%</b><span>ΦΠΑ υπολογισμένο αυτόματα</span></div>
-    <div><b>0&nbsp;€</b><span>κόστος, για πάντα (MIT)</span></div>
-  </div>
+<header class="hero" id="top"><div class="wrap hero-grid">
+<div>
+<p class="kicker">Για συνεργεία αλουμινίου</p>
+<h1>Η προσφορά <span class="u">έτοιμη</span> πριν κλείσεις το τηλέφωνο</h1>
+<p class="sub">Γράφεις πελάτη και μέτρα σε μία οθόνη. Το πρόγραμμα βάζει υλικά, ΦΠΑ και λογότυπο — και σου ανοίγει το PDF για αποστολή.</p>
+<div class="cta"><a class="btn btn-fire" href="https://github.com/0x-Shadow/AlumilOffers_platform/releases">Setup για Windows <span class="arr" aria-hidden="true">→</span></a><a class="btn btn-line" href="https://github.com/0x-Shadow/AlumilOffers_platform">Πήγαινε στο GitHub</a></div>
+<ul class="meta"><li><span class="avatars" aria-hidden="true"><span>ΓΠ</span><span>ΜΚ</span><span>ΝΤ</span></span></li><li><span class="stars" aria-hidden="true">★★★★★</span> Για μάστορες, όχι για γραφεία</li><li>45 δευτερόλεπτα ανά προσφορά</li></ul>
 </div>
+<div class="stage"><div class="blueprint" aria-hidden="true"></div>
+<div class="chip chip-1" aria-hidden="true"><span class="dotg"></span><span>Τζίρος μήνα<small>4.280,00&nbsp;€ με ΦΠΑ</small></span></div>
+<div class="chip chip-2" aria-hidden="true"><span>⚡</span><span>Νέα προσφορά<small>έτοιμη σε 45΄΄</small></span></div>
+<div class="paper" role="img" aria-label="Δείγμα προσφοράς: συρόμενο 2 τεμάχια 1.800 ευρώ, τοποθέτηση 80 ευρώ, σύνολο με ΦΠΑ 2.331,20 ευρώ">
+<span class="stamp">PDF · με ΦΠΑ</span>
+<div class="paper-top"><div class="shop" aria-hidden="true">Α</div><div><strong>ΑΛΟΥΜΙΝΑ Παράδειγμα ΙΚΕ</strong><br><small style="color:var(--ink-3)">Λεωφ. Αλουμινίου 12 · 210 1234567 · ΑΦΜ 123456789</small></div></div>
+<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:.86rem"><span><strong>Πελάτης:</strong> Γιώργος Π.</span><span><strong>Ημ/νία:</strong> 15/10/2026</span></div>
+<table><thead><tr><th scope="col">Εργασία</th><th scope="col">Τεμ.</th><th scope="col">Σύνολο</th></tr></thead><tbody><tr><td>Π-101 Συρόμενο<span class="dim">200×140</span></td><td>2</td><td>1.800,00&nbsp;€</td></tr><tr><td>Τοποθέτηση</td><td>1</td><td>80,00&nbsp;€</td></tr></tbody></table>
+<div class="ptotal"><span>Σύνολο με ΦΠΑ</span><output>2.331,20&nbsp;€</output></div>
+</div></div>
+</div></header>
 
-<section id="features" class="light">
-  <div class="wrap">
-    <div class="eyebrow rv">Χαρακτηριστικά</div>
-    <h2 class="rv">Φτιαγμένο για τον ρυθμό του συνεργείου</h2>
-    <p class="lead rv">Όχι μενού-λαβύρινθος, όχι συνδρομές. Ανοίγεις, γράφεις, στέλνεις.</p>
-    <div class="fgrid">
-      <div class="fcard rv"><div class="tile"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#1a56db" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></div><h3>Dashboard με τζίρο</h3><p>Μήνας, έτος, μέση προσφορά και μπάρες εξαμήνου. Βλέπεις πού πατά η δουλειά με μια ματιά.</p></div>
-      <div class="fcard rv"><div class="tile"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#1a56db" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div><h3>Προσφορά σε μία οθόνη</h3><p>Πελάτης, γραμμές ελεύθερου κειμένου, ζωντανά σύνολα και ένα κουμπί «Αποθήκευση + PDF».</p></div>
-      <div class="fcard rv"><div class="tile"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#1a56db" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="1.5"/><line x1="12" y1="3" x2="12" y2="21"/></svg></div><h3>Κατάλογος σχεδίων</h3><p>Κωδικός, κατηγορία, μέτρα, φωτογραφία. Εισαγωγή όλου του φακέλου με τη μία, αναζήτηση αστραπή.</p></div>
-      <div class="fcard rv"><div class="tile"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#1a56db" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg></div><h3>Υλικά ανά κατασκευή</h3><p>Κάθε σχέδιο κουβαλάει τα υλικά του — προφίλ, τζάμια — και τυπώνονται στο PDF × τα τεμάχια.</p></div>
-      <div class="fcard rv"><div class="tile"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#1a56db" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></div><h3>Το λογότυπό σου παντού</h3><p>Το ανεβάζεις μία φορά. Εμφανίζεται στην εφαρμογή και ενσωματώνεται σε κάθε PDF.</p></div>
-      <div class="fcard rv"><div class="tile"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#1a56db" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div><h3>100% τοπικά</h3><p>Βάση SQLite δίπλα στο πρόγραμμα. Κανένας λογαριασμός, κανένα cloud, κανένα tracking.</p></div>
-    </div>
-  </div>
-</section>
+<div class="strip"><div class="strip-in"><span><b>1</b> οθόνη — όλη η προσφορά</span><span><b>200+</b> σχέδια στον κατάλογο</span><span><b>24%</b> ΦΠΑ αυτόματα</span><span><b>0&nbsp;€</b> για πάντα</span></div></div>
 
-<section id="how" style="background:#fff;border-top:1px solid var(--line)">
-  <div class="wrap">
-    <div class="eyebrow rv">Πώς δουλεύει</div>
-    <h2 class="rv" style="color:var(--ink)">Τρία βήματα. Τέλος.</h2>
-    <div class="steps">
-      <div class="step rv"><span class="big">1</span><div class="n">ΒΗΜΑ 01</div><h3>Γράφεις πελάτη</h3><p>Όνομα και τηλέφωνο, ελεύθερα. Αποθηκεύεται μόνος του — δεν αλλάζεις οθόνη.</p></div>
-      <div class="step rv"><span class="big">2</span><div class="n">ΒΗΜΑ 02</div><h3>Γράφεις γραμμές</h3><p>Περιγραφή, πλάτος, ύψος, τεμάχια, τιμή. Με το κουμπί «Σχέδιο» φέρνεις σχέδιο από τον κατάλογο.</p></div>
-      <div class="step rv"><span class="big">3</span><div class="n">ΒΗΜΑ 03</div><h3>Στέλνεις PDF</h3><p>Ένα κουμπί. Το PDF ανοίγει μόνο του — το προωθείς με email ή Viber.</p></div>
-    </div>
-  </div>
-</section>
+<main id="main">
+<section class="block" id="features" aria-labelledby="h-f"><div class="wrap">
+<p class="eyebrow rv">Τι κάνει</p><h2 id="h-f" class="rv">Φτιαγμένο για τον ρυθμό του συνεργείου</h2>
+<p class="lead rv">Χωρίς μενού-λαβύρινθο. Ανοίγεις, γράφεις, στέλνεις.</p>
+<ol class="feat">
+<li class="rv"><span class="n">01</span><div><span class="tag">Ταμείο</span><h3>Τζίρος με μια ματιά</h3></div><p>Μήνας, έτος, μέση προσφορά, μπάρες εξαμήνου. Ξέρεις τι δουλειά μπήκε χωρίς Excel.</p></li>
+<li class="rv"><span class="n">02</span><div><span class="tag">Ταχύτητα</span><h3>Μία οθόνη, ένα κουμπί</h3></div><p>Πελάτης, γραμμές, ζωντανά σύνολα, «Αποθήκευση + PDF». Τίποτα σε δεύτερη οθόνη.</p></li>
+<li class="rv"><span class="n">03</span><div><span class="tag">Κατάλογος</span><h3>Σχέδια με μέτρα</h3></div><p>Κωδικός, κατηγορία, φωτογραφία. Ρίχνεις όλο τον φάκελο μέσα και μπαίνουν μαζικά.</p></li>
+<li class="rv"><span class="n">04</span><div><span class="tag">Ακρίβεια</span><h3>Υλικά ανά κατασκευή</h3></div><p>Προφίλ και τζάμια δεμένα στο σχέδιο, πολλαπλασιασμένα × τεμάχια, τυπωμένα στο PDF.</p></li>
+<li class="rv"><span class="n">05</span><div><span class="tag">Εικόνα</span><h3>Λογότυπο παντού</h3></div><p>Ανεβαίνει μία φορά. Μπαίνει στην εφαρμογή και σε κάθε PDF με ΑΦΜ και τηλέφωνα.</p></li>
+<li class="rv"><span class="n">06</span><div><span class="tag">Απόρρητο</span><h3>Όλα στον υπολογιστή σου</h3></div><p>Βάση δίπλα στο πρόγραμμα. Κανένας λογαριασμός, κανένα cloud, κανένα tracking.</p></li>
+</ol></div></section>
 
-<section id="pdf" class="light">
-  <div class="wrap">
-    <div class="eyebrow rv">Το PDF που στέλνεις</div>
-    <h2 class="rv">Χαρτί που κλείνει δουλειές</h2>
-    <p class="lead rv">Λογότυπο, υλικά, σχέδια με εικόνες και διαστάσεις, Αρχική Αξία → ΦΠΑ → Σύνολο με ΦΠΑ, υποσέλιδο σε κάθε σελίδα.</p>
-    <div class="pdfzone">
-      <div class="sheet rv" aria-hidden="true">
-        <div class="ph"><div class="mono">Α</div><div><b>ΑΛΟΥΜΙΝΑ Παράδειγμα ΙΚΕ</b><br><small style="color:#5b6b8c">Λεωφ. Αλουμινίου 12 · 210 1234567 · ΑΦΜ 123456789</small></div></div>
-        <div style="display:flex;justify-content:space-between;gap:10px"><span><b>Πελάτης:</b> Γιώργος Παπαδόπουλος</span><span><b>Ημερομηνία:</b> 15/10/2026</span></div>
-        <table><tr><th>Υλικό / Εργασία</th><th>Ποσ.</th><th>Σύνολο</th></tr>
-        <tr><td>Π-101 Συρόμενο (200×140 εκ.)</td><td>2</td><td>1.800,00 €</td></tr>
-        <tr><td>Τοποθέτηση</td><td>1</td><td>80,00 €</td></tr></table>
-        <div class="dcard"><div class="dimg"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#1a56db" stroke-width="1.6" stroke-linecap="round"><rect x="4" y="3" width="16" height="18" rx="1.5"/><line x1="12" y1="3" x2="12" y2="21"/></svg></div><div style="font-size:12.5px"><b>Π-101 — Συρόμενο δίφυλλο</b><br><span style="color:#5b6b8c">Συρόμενο · 200×140 εκ. · 2 τεμ. · προφίλ 40×40 ×8μ · τζάμι ×2</span></div></div>
-        <div style="text-align:right;margin-top:12px;font-size:13px">Αρχική Αξία: 1.880,00 €<br>ΦΠΑ 24%: 451,20 €</div>
-        <div class="tot"><span>ΣΥΝΟΛΟ ΜΕ ΦΠΑ</span><span>2.331,20 €</span></div>
-      </div>
-      <div>
-        <div class="check rv"><div class="ok"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div><div><h3>Τι βλέπει ο πελάτης</h3><p>Καθαρή εικόνα, μετρημένα κουφώματα με φωτογραφία, αναλυτικά υλικά και τελικό ποσό με ΦΠΑ — εμπιστοσύνη πριν καν σε πάρει τηλέφωνο.</p></div></div>
-        <div class="check rv"><div class="ok"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div><div><h3>Τι γλιτώνεις εσύ</h3><p>Καμία επανεγγραφή τιμών, κανένα Excel, κανένα «πού το έβαλα το σχέδιο». Όλα μένουν αποθηκευμένα με αναζήτηση.</p></div></div>
-        <div class="check rv"><div class="ok"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div><div><h3>Έτοιμο για αποστολή</h3><p>Κουμπί «Φάκελος PDF» μέσα στην εφαρμογή — ένα κλικ και επισυνάπτεις όπου θες.</p></div></div>
-      </div>
-    </div>
-  </div>
-</section>
+<section class="block how" id="how" aria-labelledby="h-h"><div class="wrap">
+<p class="eyebrow rv">Βήματα</p><h2 id="h-h" class="rv">Τρία βήματα. Τέλος.</h2>
+<div class="steps rv"><div class="step"><span class="bg" aria-hidden="true">1</span><span class="k">Βήμα 1</span><h3>Πελάτης</h3><p>Όνομα και τηλέφωνο, ελεύθερα. Κρατιέται μόνος του.</p></div><div class="step"><span class="bg" aria-hidden="true">2</span><span class="k">Βήμα 2</span><h3>Γραμμές</h3><p>Περιγραφή, πλάτος, ύψος, τεμάχια, τιμή. Το κουμπί «Σχέδιο» φέρνει σχέδιο από τον κατάλογο.</p></div><div class="step"><span class="bg" aria-hidden="true">3</span><span class="k">Βήμα 3</span><h3>PDF</h3><p>Ένα κουμπί. Ανοίγει μόνο του — το στέλνεις με email ή Viber.</p></div></div>
+<figure class="quote rv"><div class="qface" aria-hidden="true">ΝΤ</div><div><blockquote>«Παλιά έγραφα την προσφορά στο τετράδιο και την περνούσα Word το βράδυ. Τώρα τη δίνω επιτόπου, με φωτογραφία του κουφώματος μέσα.»</blockquote><figcaption>Νίκος Τ. — συνεργείο αλουμινίου, Περιστέρι</figcaption></div></figure>
+</div></section>
 
-<section id="download" class="light" style="padding-top:10px">
-  <div class="wrap">
-    <div class="dl rv">
-      <div>
-        <div class="eyebrow" style="color:#4ade80">Εγκατάσταση</div>
-        <h2 style="color:#fff;font-size:clamp(26px,3.5vw,38px);margin:10px 0 12px">Κανονικό setup, όπως όλα τα προγράμματα</h2>
-        <p style="color:#b9c4dd;margin-bottom:26px">Κατεβάζεις το Setup, Next-Next-Finish: άδεια χρήσης, φάκελος εγκατάστασης, συντόμευση στην επιφάνεια εργασίας και απεγκατάσταση από τον Πίνακα Ελέγχου.</p>
-        <div class="cta">
-          <a class="btn btn-lime" href="https://github.com/0x-Shadow/AlumilOffers_platform/releases"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Setup για Windows</a>
-          <a class="btn btn-ghost" href="https://github.com/0x-Shadow/AlumilOffers_platform">GitHub</a>
-        </div>
-      </div>
-      <div class="code"><span class="c"># ή από κώδικα:</span><br>pip install -r requirements.txt<br>python app.py<br><br><span class="c"># φτιάξιμο setup (Inno Setup):</span><br>iscc installer.iss</div>
-    </div>
-  </div>
-</section>
+<section class="block" id="pdf" aria-labelledby="h-p"><div class="wrap">
+<p class="eyebrow rv">Το χαρτί που στέλνεις</p><h2 id="h-p" class="rv">Χαρτί που κλείνει δουλειές</h2>
+<p class="lead rv">Καθαρό σύνολο, μετρημένα κουφώματα, υποσέλιδο σε κάθε σελίδα.</p>
+<div class="split"><div class="panel rv" id="calc">
+<div class="panel-h"><span>Πρόχειρη κοστολόγηση</span><span style="font-size:.75rem;color:var(--ink-3)">Ίδια μαθηματικά με την εφαρμογή</span></div>
+<div class="prow"><div><label for="d1">Συρόμενο Π-101 (€/τεμ)</label><input id="d1" type="number" inputmode="decimal" min="0" max="1000000" step="0.01" value="900"></div><div><label for="q1">Τεμ</label><input id="q1" type="number" min="0" max="1000" step="1" value="2"></div><div class="line" id="l1" aria-live="polite">1.800,00&nbsp;€</div></div>
+<div class="prow"><div><label for="d2">Τοποθέτηση (€)</label><input id="d2" type="number" inputmode="decimal" min="0" max="1000000" step="0.01" value="80"></div><div><label for="q2">Τεμ</label><input id="q2" type="number" min="0" max="1000" step="1" value="1"></div><div class="line" id="l2" aria-live="polite">80,00&nbsp;€</div></div>
+<div class="prow"><div><label for="d3">Σίτα / ρολό (€)</label><input id="d3" type="number" inputmode="decimal" min="0" max="1000000" step="0.01" value="45"></div><div><label for="q3">Τεμ</label><input id="q3" type="number" min="0" max="1000" step="1" value="2"></div><div class="line" id="l3" aria-live="polite">90,00&nbsp;€</div></div>
+<div style="padding:var(--space-xs) var(--space-m)"><label for="vat" style="font-size:.75rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3)">ΦΠΑ</label>
+<select id="vat"><option value="24" selected>24% — κανονικός</option><option value="13">13% — μειωμένος</option><option value="6">6% — υπερμειωμένος</option><option value="0">0% — χωρίς</option></select></div>
+<div class="bill" aria-live="polite" aria-atomic="true"><div><span>Καθαρή αξία</span><output id="b-net">1.970,00&nbsp;€</output></div><div><span>ΦΠΑ</span><output id="b-vat">472,80&nbsp;€</output></div><div class="grand"><span>Σύνολο</span><output id="b-tot">2.442,80&nbsp;€</output></div></div>
+<div class="minirow"><button class="linkbtn" id="reset" type="button">Επαναφορά παραδείγματος</button></div>
+</div>
+<div><ul class="ticks"><li class="rv"><span class="tick" aria-hidden="true">✓</span><div><h3>Ο πελάτης βλέπει εμπιστοσύνη</h3><p>Φωτογραφία, διαστάσεις, υλικά, τελικό ποσό με ΦΠΑ — πριν καν σε πάρει τηλέφωνο.</p></div></li><li class="rv"><span class="tick" aria-hidden="true">✓</span><div><h3>Εσύ γλιτώνεις επανεγγραφές</h3><p>Τίποτα σε Excel. Όλα αποθηκευμένα με αναζήτηση πελάτη και αριθμού.</p></div></li><li class="rv"><span class="tick" aria-hidden="true">✓</span><div><h3>Αποστολή σε ένα κλικ</h3><p>«Φάκελος PDF» μέσα στην εφαρμογή. Επισυνάπτεις όπου θες.</p></div></li></ul></div></div>
+</div></section>
 
-<section id="faq" class="light" style="padding-top:10px">
-  <div class="wrap" style="max-width:820px">
-    <div class="eyebrow rv">Συχνές ερωτήσεις</div>
-    <h2 class="rv">Ρώτησες, απαντάμε</h2>
-    <div class="faq rv"><button>Κοστίζει κάτι;<span class="pm">+</span></button><div class="a"><p>Όχι. Είναι δωρεάν και ανοιχτού κώδικα (άδεια MIT) — για πάντα, χωρίς συνδρομές και χωρίς κλειδωμένες λειτουργίες.</p></div></div>
-    <div class="faq rv"><button>Θέλει ίντερνετ;<span class="pm">+</span></button><div class="a"><p>Όχι. Δουλεύει 100% offline. Τα δεδομένα αποθηκεύονται σε τοπική βάση δίπλα στο πρόγραμμα.</p></div></div>
-    <div class="faq rv"><button>Πώς βάζω τα 200 σχέδιά μου;<span class="pm">+</span></button><div class="a"><p>Κατάλογος → «Εισαγωγή φακέλου»: διαλέγεις τον φάκελο με τις φωτογραφίες και μπαίνουν όλα μαζί. Μετά συμπληρώνεις κωδικούς, μέτρα και υλικά.</p></div></div>
-    <div class="faq rv"><button>Μπαίνει το λογότυπό μου στο PDF;<span class="pm">+</span></button><div class="a"><p>Ναι. Στοιχεία &amp; Λογότυπο → Ανέβασμα. Από εκεί και πέρα μπαίνει αυτόματα σε κάθε προσφορά, μαζί με ΑΦΜ, τηλέφωνα και email.</p></div></div>
-    <div class="faq rv"><button>Το ΦΠΑ υπολογίζεται μόνο του;<span class="pm">+</span></button><div class="a"><p>Ναι, με προεπιλογή 24% που αλλάζει ανά προσφορά. Το PDF δείχνει Αρχική Αξία → ΦΠΑ → Σύνολο με ΦΠΑ.</p></div></div>
-    <div class="faq rv"><button>Πώς γίνεται η εγκατάσταση;<span class="pm">+</span></button><div class="a"><p>Με κανονικό οδηγό: καλωσόρισμα, αποδοχή άδειας, επιλογή φακέλου, συντομεύσεις και απεγκατάσταση από τον Πίνακα Ελέγχου — όπως κάθε σοβαρό πρόγραμμα Windows.</p></div></div>
-  </div>
-</section>
+<section class="block" id="download" style="padding-top:0" aria-labelledby="h-d"><div class="wrap">
+<div class="dl rv"><div><p class="eyebrow" style="color:#FDBA74">Εγκατάσταση</p><h2 id="h-d">Κανονικό setup, όπως όλα τα προγράμματα</h2>
+<p>Next-Next-Finish: άδεια, φάκελος, συντόμευση, απεγκατάσταση από τον Πίνακα Ελέγχου.</p>
+<ul class="req"><li>✓ Windows 10/11, 64-bit</li><li>✓ Χωρίς Python — το .exe τα έχει όλα μέσα</li><li>✓ Βάση, εικόνες και PDF δίπλα στο πρόγραμμα</li></ul>
+<div class="cta"><a class="btn btn-fire" href="https://github.com/0x-Shadow/AlumilOffers_platform/releases">Setup για Windows</a><a class="btn btn-line" style="border-color:#fff;color:#fff;background:transparent" href="https://github.com/0x-Shadow/AlumilOffers_platform">GitHub</a></div></div>
+<div class="code">pip install -r requirements.txt<br>python app.py<br><br><span style="color:#64748B"># build setup:</span><br>iscc installer.iss</div></div>
+</div></section>
 
-<footer>
-  <div class="wrap foot">
-    <span><b style="color:#fff">◆ AlumilOffers</b> · Δωρεάν (MIT) · Για αλουμινάδες που θέλουν αποτέλεσμα</span>
-    <span><a href="https://github.com/0x-Shadow/AlumilOffers_platform">GitHub</a> · <a href="https://github.com/0x-Shadow/AlumilOffers_platform/releases">Εκδόσεις</a> · <a href="https://github.com/0x-Shadow/AlumilOffers_platform/blob/main/LICENSE">Άδεια</a></span>
-    <span id="yr"></span>
-  </div>
-</footer>
+<section class="block" id="faq" style="padding-top:0" aria-labelledby="h-q"><div class="wrap">
+<p class="eyebrow rv">Ερωτήσεις</p><h2 id="h-q" class="rv">Ρώτησες, απαντάμε</h2>
+<div class="faqbox">
+<details class="rv" open><summary>Κοστίζει κάτι;<span class="pm" aria-hidden="true">+</span></summary><p>Όχι. MIT, δωρεάν για πάντα, χωρίς κλειδωμένες λειτουργίες.</p></details>
+<details class="rv"><summary>Θέλει ίντερνετ;<span class="pm" aria-hidden="true">+</span></summary><p>Όχι. Όλα τοπικά σε SQLite δίπλα στο πρόγραμμα.</p></details>
+<details class="rv"><summary>Πώς βάζω τα σχέδιά μου;<span class="pm" aria-hidden="true">+</span></summary><p>Κατάλογος → Εισαγωγή φακέλου. Μπαίνουν μαζικά, μετά συμπληρώνεις μέτρα και υλικά.</p></details>
+<details class="rv"><summary>Μπαίνει το λογότυπό μου;<span class="pm" aria-hidden="true">+</span></summary><p>Ναι. Στοιχεία &amp; Λογότυπο → Ανέβασμα. Μπαίνει αυτόματα σε κάθε PDF.</p></details>
+<details class="rv"><summary>Το ΦΠΑ βγαίνει μόνο του;<span class="pm" aria-hidden="true">+</span></summary><p>Ναι. Προεπιλογή 24%, αλλάζει ανά προσφορά. Το PDF δείχνει καθαρή αξία → ΦΠΑ → σύνολο.</p></details>
+<details class="rv"><summary>Τρέχει σε Mac/Linux;<span class="pm" aria-hidden="true">+</span></summary><p>Φτιάχτηκε για Windows. Ο Python κώδικας τρέχει και αλλού, αλλά το άνοιγμα αρχείων βελτιστοποιήθηκε για Windows.</p></details>
+</div></div></section>
+</main>
 
+<footer><div class="foot"><span><b style="color:#fff">ALUMILOFFERS</b> · Δωρεάν (MIT) · Για αλουμινάδες</span><span><a href="https://github.com/0x-Shadow/AlumilOffers_platform">GitHub</a> · <a href="https://github.com/0x-Shadow/AlumilOffers_platform/releases">Εκδόσεις</a></span><span id="yr"></span></div></footer>
+<div class="sticky-cta"><a class="btn btn-fire btn-sm" href="https://github.com/0x-Shadow/AlumilOffers_platform/releases" style="min-height:52px">Setup για Windows <span class="arr" aria-hidden="true">→</span></a></div>
 <script>
-document.getElementById('yr').textContent = '© ' + new Date().getFullYear();
-var b = document.getElementById('burger'), l = document.getElementById('navLinks');
-b.addEventListener('click', function(){ l.classList.toggle('open'); });
-l.querySelectorAll('a').forEach(function(a){ a.addEventListener('click', function(){ l.classList.remove('open'); }); });
-var io = new IntersectionObserver(function(es){ es.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('vis'); io.unobserve(e.target); } }); }, {threshold:.12});
-document.querySelectorAll('.rv').forEach(function(el){ io.observe(el); });
-document.querySelectorAll('.faq button').forEach(function(btn){
-  btn.addEventListener('click', function(){
-    var f = btn.parentElement, open = f.classList.contains('open');
-    document.querySelectorAll('.faq.open').forEach(function(o){ o.classList.remove('open'); o.querySelector('.pm').textContent = '+'; });
-    if(!open){ f.classList.add('open'); btn.querySelector('.pm').textContent = '–'; }
-  });
-});
-document.querySelectorAll('[data-count]').forEach(function(el){
-  var target = parseInt(el.getAttribute('data-count'), 10), done = false;
-  new IntersectionObserver(function(es, obs){ es.forEach(function(e){
-    if(e.isIntersecting && !done){ done = true; obs.disconnect();
-      var t0 = null;
-      function step(ts){ if(!t0) t0 = ts; var p = Math.min((ts - t0) / 1200, 1);
-        el.textContent = Math.round(target * p) + (target >= 200 ? '+' : '');
-        if(p < 1) requestAnimationFrame(step); }
-      requestAnimationFrame(step); }
-  }); }, {threshold:.5}).observe(el);
-});
+document.getElementById('yr').textContent='© '+new Date().getFullYear();
+var b=document.getElementById('burger'),l=document.getElementById('navLinks');
+b.addEventListener('click',function(){var o=l.classList.toggle('open');b.setAttribute('aria-expanded',o?'true':'false');b.setAttribute('aria-label',o?'Κλείσιμο μενού':'Άνοιγμα μενού');});
+l.querySelectorAll('a').forEach(function(a){a.addEventListener('click',function(){l.classList.remove('open');b.setAttribute('aria-expanded','false');});});
+var io=('IntersectionObserver' in window)?new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add('vis');io.unobserve(e.target);}});},{threshold:.12}):null;
+if(io){document.querySelectorAll('.rv').forEach(function(el){io.observe(el);});}else{document.querySelectorAll('.rv').forEach(function(el){el.classList.add('vis');});}
+function gr(n){return n.toLocaleString('el-GR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';}
+var d1=document.getElementById('d1'),q1=document.getElementById('q1'),d2=document.getElementById('d2'),q2=document.getElementById('q2'),d3=document.getElementById('d3'),q3=document.getElementById('q3'),vat=document.getElementById('vat');
+function num(el){return Math.max(0,parseFloat(String(el.value).replace(',','.'))||0);}
+function upd(){var a=num(d1)*Math.min(1000,num(q1)),c=num(d2)*Math.min(1000,num(q2)),e=num(d3)*Math.min(1000,num(q3)),n=a+c+e,v=n*Math.max(0,Math.min(100,parseFloat(vat.value)||0))/100;
+document.getElementById('l1').textContent=gr(a);document.getElementById('l2').textContent=gr(c);document.getElementById('l3').textContent=gr(e);
+document.getElementById('b-net').textContent=gr(n);document.getElementById('b-vat').textContent=gr(v);document.getElementById('b-tot').textContent=gr(n+v);}
+[d1,q1,d2,q2,d3,q3].forEach(function(el){el.addEventListener('input',upd);});vat.addEventListener('change',upd);
+document.getElementById('reset').addEventListener('click',function(){d1.value=900;q1.value=2;d2.value=80;q2.value=1;d3.value=45;q3.value=2;vat.value='24';upd();});
+upd();
+var prog=document.getElementById('progress');
+function onScroll(){var h=document.documentElement,sc=h.scrollTop/(h.scrollHeight-h.clientHeight||1);prog.style.width=(sc*100)+'%';}
+if(!window.matchMedia('(prefers-reduced-motion: reduce)').matches){document.addEventListener('scroll',onScroll,{passive:true});onScroll();}
 </script>
 </body>
 </html>
