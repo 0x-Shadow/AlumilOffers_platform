@@ -1,0 +1,19 @@
+# Local runtime data (personal, never commit)
+alumina.db
+logo.png
+Sxedia/
+PDF_Prosfores/
+
+# PyInstaller build artifacts
+build/
+dist/
+*.spec
+
+# Binaries (use GitHub Releases instead)
+*.exe
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
