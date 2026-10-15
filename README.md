@@ -89,5 +89,4 @@ Nothing is uploaded anywhere. See [docs/PRIVACY_EL.md](docs/PRIVACY_EL.md).
 
 ## License
 
-MIT — see [LICENSE](LICENSE). The app also shows a short Greek
-terms-of-use dialog on first launch (`docs/TERMS_EL.md`).
+MIT — see [LICENSE](LICENSE) (accepted during setup; Greek terms in [`docs/TERMS_EL.md`](docs/TERMS_EL.md)).

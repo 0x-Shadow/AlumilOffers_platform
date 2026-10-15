@@ -27,7 +27,7 @@ LicenseFile=LICENSE
 InfoBeforeFile=README.md
 SetupIconFile=
 UninstallDisplayName={#MyAppName} {#MyAppVersion}
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesInstallIn64BitMode=x64compatible
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

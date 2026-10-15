@@ -56,19 +56,6 @@ CATEGORIES = ["Παράθυρο", "Πόρτα", "Συρόμενο", "Σταθε�
 GR_MONTHS = ["", "ΙΑΝ", "ΦΕΒ", "ΜΑΡ", "ΑΠΡ", "ΜΑΪ", "ΙΟΥΝ",
              "ΙΟΥΛ", "ΑΥΓ", "ΣΕΠ", "ΟΚΤ", "ΝΟΕ", "ΔΕΚ"]
 
-EULA_TEXT = (
-    "ΟΡΟΙ ΧΡΗΣΗΣ — AluminaOffers\n\n"
-    "1. Η εφαρμογή παρέχεται δωρεάν, «ως έχει», χωρίς καμία εγγύηση.\n"
-    "2. Όλα τα δεδομένα (προσφορές, πελάτες, σχέδια, λογότυπο) "
-    "αποθηκεύονται τοπικά στον υπολογιστή σας. Δεν αποστέλλεται "
-    "τίποτα στο διαδίκτυο.\n"
-    "3. Είστε υπεύθυνοι για την ορθότητα των τιμών, των φόρων (ΦΠΑ) "
-    "και των στοιχείων που εκδίδετε. Συμβουλευτείτε τον λογιστή σας.\n"
-    "4. Κρατάτε αντίγραφα ασφαλείας του φακέλου της εφαρμογής.\n"
-    "5. Ο πηγαίος κώδικας διατίθεται με άδεια MIT (αρχείο LICENSE).\n\n"
-    "Πατώντας «Αποδοχή & Συνέχεια» αποδέχεστε τους παραπάνω όρους."
-)
-
 # ================= DATABASE =================
 def db():
     c = sqlite3.connect(DB)
@@ -425,39 +412,6 @@ class App(ctk.CTk):
         self.main = ctk.CTkFrame(self, fg_color=BG, corner_radius=0)
         self.main.pack(side="right", fill="both", expand=True)
         self.show("home")
-        try:
-            self._check_eula()
-        except Exception:
-            pass
-
-    def _check_eula(self):
-        c = db()
-        r = c.execute("SELECT value FROM settings WHERE key='eula'").fetchone()
-        c.close()
-        if r:
-            return
-        win = ctk.CTkToplevel(self)
-        win.title("Όροι χρήσης")
-        win.geometry("540x440")
-        win.grab_set()
-        win.protocol("WM_DELETE_WINDOW", lambda: (win.destroy(), self.destroy()))
-        ctk.CTkLabel(win, text="Όροι χρήσης", font=("Arial", 18, "bold"),
-                     text_color=TXTD).pack(pady=(16, 6))
-        txt = ctk.CTkTextbox(win, font=("Arial", 12), height=250)
-        txt.pack(fill="both", expand=True, padx=16)
-        txt.insert("1.0", EULA_TEXT)
-        txt.configure(state="disabled")
-
-        def accept():
-            c2 = db()
-            c2.execute("INSERT OR REPLACE INTO settings VALUES('eula',?)",
-                       (datetime.now().strftime("%d/%m/%Y"),))
-            c2.commit(); c2.close()
-            win.destroy()
-        ctk.CTkButton(win, text="Αποδοχή & Συνέχεια", font=("Arial", 14, "bold"),
-                      height=48, fg_color=GREEN, hover_color="#15803d",
-                      command=accept).pack(padx=16, pady=12, fill="x")
-        self.wait_window(win)
 
     def clear(self):
         for w in self.main.winfo_children():
