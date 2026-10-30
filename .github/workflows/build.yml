@@ -5,6 +5,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag name for release (e.g. v1.2.0)'
+        required: false
+        default: 'v1.2.0'
 
 permissions:
   contents: write
@@ -17,6 +22,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -39,9 +46,16 @@ jobs:
           copy dist\AluminaOffers.exe .\AluminaOffers.exe
 
       - name: Build Inno Setup Installer
-        run: |
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
         shell: powershell
+        run: |
+          if (Get-Command iscc -ErrorAction SilentlyContinue) {
+              iscc installer.iss
+          } elseif (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe") {
+              & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+          } else {
+              choco install innosetup --no-progress
+              & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+          }
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
@@ -52,10 +66,30 @@ jobs:
             Setup_AluminaOffers_*.exe
 
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.tag != ''
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: AluminaOffers v1.2.0 — Visual Catalog & CAD Schematics
+          body: |
+            ## AluminaOffers v1.2.0
+
+            ### Τι νέο υπάρχει (What's New)
+            - 📐 **Οπτικός Κατάλογος & Επιλογέας Κουφωμάτων**: Νέο παράθυρο επιλογής σχεδίων με φίλτρα (Συρόμενα, Ανοιγόμενα, Μπαλκονόπορτες, Σταθερά, Πόρτες), αναζήτηση χωρίς ευαισθησία σε τόνους/πεζά-κεφαλαία και άμεση προεπισκόπηση.
+            - 🖼️ **Έτοιμα Πρότυπα Alumil & Europa**: 10 προεπιλεγμένα σχέδια με τεχνικά CAD σκίτσα (ρολά, σίτες, καΐτια, ανακλίσεις DIN/ISO) και πλήρεις τεχνικές προδιαγραφές (Alumil S350 Alutherm, M9660, Europa 5500 Hybrid κ.α.).
+            - 📋 **Αντιγραφή Γραμμής (Duplicate)**: Αντιγράψτε με 1 κλικ ολόκληρο κούφωμα με όλες τις ρυθμίσεις του.
+            - ⚙️ **Επεξεργασία Προδιαγραφών ανά γραμμή**: Παράθυρο ρύθμισης σειράς, χρώματος (RAL), σημείου τοποθέτησης και ειδικών υλικών (ρολά, σίτες, triplex) με γρήγορα κουμπιά.
+            - 📄 **Επαγγελματικό PDF Reference Layout**:
+              - CAD σχηματικά σχέδια με πραγματικές γραμμές ανοίγματος και σκίασης
+              - Πίνακας Σειρά / Χρώμα / Διαστάσεις (μορφή 3,3000 x 2,3500)
+              - Πολυγραμμικές αναλυτικές προδιαγραφές ανά κούφωμα
+              - Τελική έντονη τιμή ανά κούφωμα
+            - 🔒 **100% Offline & Ασφαλές**: Όλα τα δεδομένα αποθηκεύονται τοπικά στον υπολογιστή σας.
+
+            ### Αρχεία Εγκατάστασης (Downloads)
+            - **`Setup_AluminaOffers_1.2.0.exe`** *(Προτεινόμενο)*: Πλήρης αυτόματος οδηγός εγκατάστασης για Windows 10/11 (συντομεύσεις, απεγκατάσταση, χωρίς δικαιώματα διαχειριστή).
+            - **`AluminaOffers.exe`**: Portable έκδοση χωρίς εγκατάσταση.
           files: |
             AluminaOffers.exe
             Setup_AluminaOffers_*.exe
-          generate_release_notes: true
+          generate_release_notes: false
