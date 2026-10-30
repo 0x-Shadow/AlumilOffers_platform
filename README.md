@@ -13,14 +13,17 @@ no dependencies (publish it with GitHub Pages: Settings → Pages → `main` →
 
 - **Dashboard** — monthly/yearly revenue (incl. VAT), quotes per month,
   average quote, last-6-months revenue bars, quick actions, searchable history.
-- **New quote on one screen** — free-text lines (description | width | height |
-  qty | price), live totals, optional design picker per line, one big Save+PDF button.
-- **Designs catalog** — code, name, category, dimensions, photo, per-design
-  bill of materials; bulk import a whole folder of photos at once.
+- **Visual Design Picker (v1.2.0)** — quick-select from preset Alumil & Europa designs
+  with CAD-style technical drawings, instant search (Greek accent-insensitive), and category filters.
+- **New quote on one screen** — customizable lines (Design | Width | Height | Location |
+  Qty | Price), live totals, duplicate row (📋), detailed specs editor (⚙️), one big Save+PDF button.
+- **Designs catalog** — code, name, category, dimensions, photo, series, RAL color, per-design
+  bill of materials; built-in Alumil/Europa presets generator.
 - **Materials & customers** — simple lists, auto-registration from quotes.
 - **Company profile + logo** — shown in the app and embedded in every PDF.
-- **Professional PDF** — logo, company info, materials table, designs with
-  images/dimensions/materials, net value / VAT / total with VAT, footer on every page.
+- **Professional PDF (Reference Layout)** — logo, company info, CAD schematic elevations
+  (sliding, casement opening triangles, roller shutter hatching, flyscreens), series / color / dimensions
+  table, multi-line itemized specifications, net value / VAT / total with VAT, footer on every page.
 - **100% local** — SQLite database next to the app, no cloud, no accounts.
 
 ## Requirements

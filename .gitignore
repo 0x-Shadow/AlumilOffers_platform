@@ -8,9 +8,11 @@ PDF_Prosfores/
 build/
 dist/
 *.spec
+!AluminaOffers.spec
 
 # Binaries (use GitHub Releases instead)
 *.exe
+/AluminaOffers
 
 # Python
 __pycache__/

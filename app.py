@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-AluminaOffers v4 - Προσφορές Αλουμινάδων για Windows
+AluminaOffers v1.2.0 - Προσφορές Αλουμινάδων για Windows
 Dashboard | Νέα Προσφορά (μία οθόνη) | Κατάλογος | Στοιχεία+Λογότυπο | PDF με ΦΠΑ
 """
-import os, sqlite3, json, shutil, re, html, sys, subprocess
+__version__ = "1.2.0"
+import os, sqlite3, json, shutil, re, html, sys, subprocess, unicodedata
 from datetime import datetime
 from tkinter import messagebox, filedialog
 import customtkinter as ctk
@@ -60,11 +61,19 @@ from reportlab.lib.units import mm
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table,
                                 TableStyle, HRFlowable, Image as RLImage,
-                                KeepTogether)
+                                KeepTogether, Flowable)
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
-BASE = os.path.dirname(os.path.abspath(__file__))
+# Στην εκτελέσιμη έκδοση (PyInstaller) το __file__ δείχνει στον προσωρινό
+# φάκελο εξαγωγής (_MEI...), που διαγράφεται στο κλείσιμο → όλα τα δεδομένα
+# θα χανότουν. Άρα όταν είναι frozen, βάσε έχει ο φάκελος του ίδιου του exe
+# (δίπλα του: alumina.db, Sxedia/, PDF_Prosfores/, logo.png — όπως και το README).
+# Σε εκτέλεση από πηγή αλλάζει τίποτα.
+if getattr(sys, "frozen", False):
+    BASE = os.path.dirname(os.path.abspath(sys.executable))
+else:
+    BASE = os.path.dirname(os.path.abspath(__file__))
 DB = os.path.join(BASE, "alumina.db")
 PDF_DIR = os.path.join(BASE, "PDF_Prosfores")
 IMG_DIR = os.path.join(BASE, "Sxedia")
@@ -72,12 +81,32 @@ LOGO_FILE = os.path.join(BASE, "logo.png")
 os.makedirs(PDF_DIR, exist_ok=True)
 os.makedirs(IMG_DIR, exist_ok=True)
 
-try:
-    pdfmetrics.registerFont(TTFont('Greek', r'C:\Windows\Fonts\arial.ttf'))
-    pdfmetrics.registerFont(TTFont('Greek-Bold', r'C:\Windows\Fonts\arialbd.ttf'))
-    FONT, FONTB = 'Greek', 'Greek-Bold'
-except Exception:
-    FONT, FONTB = 'Helvetica', 'Helvetica-Bold'
+def _register_pdf_fonts():
+    """Arial on Windows, Liberation/DejaVu/Noto elsewhere — Helvetica has no Greek."""
+    pairs = [
+        (r"C:\Windows\Fonts\arial.ttf", r"C:\Windows\Fonts\arialbd.ttf"),
+        ("/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
+         "/usr/share/fonts/liberation/LiberationSans-Bold.ttf"),
+        ("/usr/share/fonts/TTF/DejaVuSans.ttf",
+         "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf"),
+        ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+        ("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
+        ("/usr/share/fonts/noto/NotoSans-Regular.ttf",
+         "/usr/share/fonts/noto/NotoSans-Bold.ttf"),
+    ]
+    for regular, bold in pairs:
+        if os.path.isfile(regular) and os.path.isfile(bold):
+            try:
+                pdfmetrics.registerFont(TTFont("Greek", regular))
+                pdfmetrics.registerFont(TTFont("Greek-Bold", bold))
+                return "Greek", "Greek-Bold"
+            except Exception:
+                continue
+    return "Helvetica", "Helvetica-Bold"
+
+FONT, FONTB = _register_pdf_fonts()
 
 DEFAULT_FPA = 24.0
 BLUE = colors.HexColor("#1a56db")
@@ -107,6 +136,127 @@ def db():
     c.row_factory = sqlite3.Row
     return c
 
+def ensure_cad_thumbnail(filename, kind='sliding', shutter=False, screen=False, leaves=2, tilt=False):
+    path = os.path.join(IMG_DIR, filename)
+    if os.path.exists(path):
+        return filename
+    try:
+        from PIL import ImageDraw
+        im = PILImage.new('RGB', (260, 220), '#ffffff')
+        draw = ImageDraw.Draw(im)
+        fx0, fy0, fx1, fy1 = 20, 20, 240, 195
+        shutter_h = 42 if shutter else 0
+        if shutter:
+            draw.rectangle([fx0, fy0, fx1, fy0 + shutter_h], outline='#475569', fill='#cbd5e1', width=2)
+            for y in range(fy0 + 6, fy0 + shutter_h, 7):
+                draw.line([(fx0 + 2, y), (fx1 - 2, y)], fill='#64748b', width=1)
+            fy0 += shutter_h
+        draw.rectangle([fx0, fy0, fx1, fy1], outline='#475569', fill='#e2e8f0', width=3)
+        gx0, gy0, gx1, gy1 = fx0 + 8, fy0 + 8, fx1 - 8, fy1 - 8
+        gw = gx1 - gx0
+        gh = gy1 - gy0
+        leaf_w = gw / max(1, leaves)
+        for i in range(leaves):
+            lx0 = int(gx0 + i * leaf_w)
+            lx1 = int(gx0 + (i + 1) * leaf_w)
+            draw.rectangle([lx0 + 2, gy0 + 2, lx1 - 2, gy1 - 2], outline='#475569',
+                           fill='#ffffff' if not (screen and i == leaves - 1) else '#f1f5f9', width=2)
+            if screen and i == leaves - 1:
+                for x in range(lx0 + 6, lx1 - 4, 4):
+                    draw.line([(x, gy0 + 4), (x, gy1 - 4)], fill='#94a3b8', width=1)
+            cx = (lx0 + lx1) // 2
+            cy = (gy0 + gy1) // 2
+            if kind == 'sliding':
+                if i == 0:
+                    draw.polygon([(cx + 12, cy), (cx - 6, cy - 8), (cx - 6, cy + 8)], fill='#1e293b')
+                else:
+                    draw.polygon([(cx - 12, cy), (cx + 6, cy - 8), (cx + 6, cy + 8)], fill='#1e293b')
+            elif kind == 'tilt' or tilt:
+                draw.line([(lx0 + 6, gy0 + 6), (cx, gy1 - 6)], fill='#64748b', width=2)
+                draw.line([(lx1 - 6, gy0 + 6), (cx, gy1 - 6)], fill='#64748b', width=2)
+            elif kind == 'casement':
+                if leaves == 1:
+                    draw.line([(lx0 + 6, gy0 + 6), (lx1 - 6, cy)], fill='#64748b', width=2)
+                    draw.line([(lx0 + 6, gy1 - 6), (lx1 - 6, cy)], fill='#64748b', width=2)
+                    draw.rectangle([lx1 - 8, cy - 8, lx1 - 4, cy + 8], fill='#1e293b')
+                elif i == 0:
+                    draw.line([(lx0 + 6, gy0 + 6), (lx1 - 4, cy)], fill='#64748b', width=2)
+                    draw.line([(lx0 + 6, gy1 - 6), (lx1 - 4, cy)], fill='#64748b', width=2)
+                    draw.rectangle([lx1 - 8, cy - 10, lx1 - 4, cy + 10], fill='#1e293b')
+                else:
+                    draw.line([(lx1 - 6, gy0 + 6), (lx0 + 4, cy)], fill='#64748b', width=2)
+                    draw.line([(lx1 - 6, gy1 - 6), (lx0 + 4, cy)], fill='#64748b', width=2)
+                    draw.rectangle([lx0 + 4, cy - 10, lx0 + 8, cy + 10], fill='#1e293b')
+            elif kind == 'fixed':
+                draw.line([(lx0 + 4, gy0 + 4), (lx1 - 4, gy1 - 4)], fill='#cbd5e1', width=1)
+                draw.line([(lx0 + 4, gy1 - 4), (lx1 - 4, gy0 + 4)], fill='#cbd5e1', width=1)
+            elif kind == 'door':
+                draw.line([(lx0 + 6, gy0 + 6), (lx1 - 6, cy)], fill='#64748b', width=2)
+                draw.line([(lx0 + 6, gy1 - 6), (lx1 - 6, cy)], fill='#64748b', width=2)
+                draw.rectangle([lx1 - 10, cy - 25, lx1 - 6, cy + 25], fill='#1e293b')
+        draw.rectangle([fx0, fy0, fx1, fy1], outline='#334155', width=2)
+        draw.text((130, 202), 'Τοποθέτηση', fill='#64748b', anchor='mm')
+        im.save(path)
+        return filename
+    except Exception:
+        return filename
+
+def seed_default_designs(c):
+    ensure_cad_thumbnail('thumb_s350_shutter_screen.png', kind='sliding', shutter=True, screen=True, leaves=2)
+    ensure_cad_thumbnail('thumb_s350_screen.png', kind='sliding', shutter=False, screen=True, leaves=2)
+    ensure_cad_thumbnail('thumb_m9660_transom.png', kind='tilt', shutter=False, screen=False, leaves=1)
+    ensure_cad_thumbnail('thumb_m9660_casement_shutter.png', kind='casement', shutter=True, screen=False, leaves=2)
+    ensure_cad_thumbnail('thumb_s350_simple.png', kind='sliding', shutter=False, screen=False, leaves=2)
+    ensure_cad_thumbnail('thumb_m9660_single_casement.png', kind='casement', shutter=False, screen=False, leaves=1)
+    ensure_cad_thumbnail('thumb_fixed.png', kind='fixed', shutter=False, screen=False, leaves=1)
+    ensure_cad_thumbnail('thumb_door.png', kind='door', shutter=False, screen=False, leaves=1)
+
+    presets = [
+        ("Π-101", "ΔΙΦΥΛΛΟ ΕΠΑΛΛΗΛΟ ΜΕ ΣΙΤΑ (S398-S384-S490-S382-S463)", "Συρόμενο",
+         "ALUMIL/S350 ALUTHERM", "ΑΝΘΡΑΚΙ RAL 8.85 (ΘΕΡΜΟ)", "330", "235", "1ος-ΓΩΝΙΑΚΟ", 3400.0,
+         "ΕΝΕΡΓΕΙΑΚΟ ΚΟΥΦΩΜΑ ΣΥΡΟΜΕΝΟ ΕΠΑΛΛΗΛΟ ΤΗΣ ALUMIL\nΥΑΛΟΠΙΝΑΚΕΣ 4 ΕΠΟΧΩΝ 4mm Planistar Evo-Argon-5mm\nΡΟΛΟ ΑΛΟΥΜΙΝΙΟΥ ΒΑΡΕΩΣ ΤΥΠΟΥ ΗΛΕΚΤΡΙΚΟ ΜΕ ΦΥΛΑΡΑΚΙΑ ΜΕΓΑΛΗΣ ΔΙΑΤΡΗΣΗΣ ΓΙΑ ΑΕΡΙΣΜΟ-ΚΟΥΤΙ ΜΕ ΘΕΡΜΟΔΙΑΚΟΠΗ\nΚΛΕΙΔΑΡΙΕΣ ΑΣΦΑΛΕΙΑΣ 4 ΚΛΕΙΔΩΜΑΤΩΝ GU ΓΕΡΜΑΝΙΑΣ\nΡΑΟΥΛΑ ΠΟΛΑΠΛΑ ΕΝΙΣΧΥΜΕΝΑ ΤΕΦΛΟΝ\nΣΙΤΑ ΣΥΡΟΜΕΝΗ ΜΟΝΟΦΥΛΛΗ",
+         "thumb_s350_shutter_screen.png"),
+        ("Π-102", "ΔΙΦΥΛΛΟ ΕΠΑΛΛΗΛΟ ΜΕ ΣΙΤΑ (S398-S384-S490-S382-S463)", "Συρόμενο",
+         "ALUMIL/S350 ALUTHERM", "ΑΝΘΡΑΚΙ RAL ΘΕΡΜΟ", "255", "75", "1ος-ΓΩΝΙΑΚΟ", 1300.0,
+         "ΕΝΕΡΓΕΙΑΚΟ ΚΟΥΦΩΜΑ ΣΥΡΟΜΕΝΟ ΕΠΑΛΛΗΛΟ ΤΗΣ ALUMIL\nΥΑΛΟΠΙΝΑΚΕΣ 4 ΕΠΟΧΩΝ 4mm Planistar Evo-Argon-5mm\nΚΛΕΙΔΑΡΙΕΣ ΑΣΦΑΛΕΙΑΣ 2 ΚΛΕΙΔΩΜΑΤΩΝ GU ΓΕΡΜΑΝΙΑΣ\nΡΑΟΥΛΑ ΠΟΛΑΠΛΑ ΕΝΙΣΧΥΜΕΝΑ ΤΕΦΛΟΝ\nΣΙΤΑ ΣΥΡΟΜΕΝΗ ΜΟΝΟΦΥΛΛΗ",
+         "thumb_s350_screen.png"),
+        ("Π-103", "ΜΟΝΟΦΥΛΛΟ ΑΝΟΙΓΟΜΕΝΟ ΦΕΓΓΙΤΗΣ (19652, 19676, 11454)", "Παράθυρο",
+         "ALUMIL/ALUMIL M9660", "ΑΝΘΡΑΚΙ RAL ΘΕΡΜΟ", "243", "75", "1ος-ΓΩΝΙΑΚΟ", 850.0,
+         "ΕΝΕΡΓΕΙΑΚΟ ΚΟΥΦΩΜΑ ΑΝΟΙΓΟΜΕΝΟ ΦΕΓΓΙΤΗΣ ΤΗΣ ALUMIL\nΥΑΛΟΠΙΝΑΚΕΣ 4 ΕΠΟΧΩΝ 4mm Planistar Evo-Argon-5mm\nΣΙΤΑ ΣΤΑΘΕΡΗ ΕΞΩΤΕΡΙΚΑ\nΜΗΧΑΝΙΣΜΟΣ ΑΝΑΚΛΙΣΗΣ",
+         "thumb_m9660_transom.png"),
+        ("Π-104", "ΔΙΦΥΛΛΟ ΑΝΟΙΓΟΜΕΝΟ ΤΖΑΜΙ (19652-19670-19682-11451)", "Παράθυρο",
+         "ALUMIL/ALUMIL M9660", "ΑΝΘΡΑΚΙ RAL ΘΕΡΜΟ", "195", "235", "ΙΣΟΓΕΙΟ", 1800.0,
+         "ΕΝΕΡΓΕΙΑΚΟ ΚΟΥΦΩΜΑ ΔΙΦΥΛΛΟ ΑΝΟΙΓΟΜΕΝΟ ΤΗΣ ALUMIL\nΥΑΛΟΠΙΝΑΚΕΣ 4 ΕΠΟΧΩΝ 4mm Planistar Evo-Argon-3+3 TRIPLEX\nΡΟΛΟ ΑΛΟΥΜΙΝΙΟΥ ΒΑΡΕΩΣ ΤΥΠΟΥ ΗΛΕΚΤΡΙΚΟ ΜΕ ΦΥΛΑΡΑΚΙΑ ΜΕΓΑΛΗΣ ΔΙΑΤΡΗΣΗΣ ΓΙΑ ΑΕΡΙΣΜΟ-ΚΟΥΤΙ ΜΕ ΘΕΡΜΟΔΙΑΚΟΠΗ\nΗΛΕΚΤΡΙΚΗ ΣΙΤΑ ΚΑΘΕΤΗΣ ΚΙΝΗΣΗΣ\nΜΗΧΑΝΙΣΜΟΣ ΑΝΑΚΛΙΣΗΣ ΦΥΛΛΟΥ",
+         "thumb_m9660_casement_shutter.png"),
+        ("Π-105", "ΜΠΑΛΚΟΝΟΠΟΡΤΑ ΔΙΦΥΛΛΗ ΑΝΟΙΓΟΜΕΝΗ ΜΕ ΡΟΛΟ & ΣΙΤΑ", "Μπαλκονόπορτα",
+         "ALUMIL/ALUMIL M9660", "ΑΝΘΡΑΚΙ RAL ΘΕΡΜΟ", "140", "220", "ΣΑΛΟΝΙ", 1650.0,
+         "ΕΝΕΡΓΕΙΑΚΗ ΜΠΑΛΚΟΝΟΠΟΡΤΑ ΔΙΦΥΛΛΗ ΑΝΟΙΓΟΜΕΝΗ ΤΗΣ ALUMIL\nΥΑΛΟΠΙΝΑΚΕΣ 4 ΕΠΟΧΩΝ 4mm Planistar Evo-Argon-5mm\nΡΟΛΟ ΑΛΟΥΜΙΝΙΟΥ ΒΑΡΕΩΣ ΤΥΠΟΥ ΗΛΕΚΤΡΙΚΟ ΜΕ ΘΕΡΜΟΔΙΑΚΟΠΗ\nΣΙΤΑ ΠΛΙΣΕ ΟΡΙΖΟΝΤΙΑΣ ΚΙΝΗΣΗΣ\nΜΗΧΑΝΙΣΜΟΣ ΑΝΑΚΛΙΣΗΣ ΦΥΛΛΟΥ",
+         "thumb_m9660_casement_shutter.png"),
+        ("Π-106", "ΔΙΦΥΛΛΟ ΕΠΑΛΛΗΛΟ ΑΠΛΟ", "Συρόμενο",
+         "ALUMIL/S350 ALUTHERM", "ΛΕΥΚΟ RAL 9010", "160", "140", "ΥΠΝΟΔΩΜΑΤΙΟ", 750.0,
+         "ΕΝΕΡΓΕΙΑΚΟ ΚΟΥΦΩΜΑ ΣΥΡΟΜΕΝΟ ΕΠΑΛΛΗΛΟ ΤΗΣ ALUMIL\nΥΑΛΟΠΙΝΑΚΕΣ 4 ΕΠΟΧΩΝ 4mm Planistar Evo-Argon-5mm\nΚΛΕΙΔΑΡΙΕΣ ΑΣΦΑΛΕΙΑΣ 2 ΚΛΕΙΔΩΜΑΤΩΝ GU ΓΕΡΜΑΝΙΑΣ\nΡΑΟΥΛΑ ΠΟΛΑΠΛΑ ΕΝΙΣΧΥΜΕΝΑ ΤΕΦΛΟΝ",
+         "thumb_s350_simple.png"),
+        ("Π-107", "ΜΟΝΟΦΥΛΛΟ ΑΝΟΙΓΟΜΕΝΟ / ΑΝΑΚΛΙΝΟΜΕΝΟ ΠΑΡΑΘΥΡΟ", "Παράθυρο",
+         "ALUMIL/ALUMIL M9660", "ΑΝΘΡΑΚΙ RAL ΘΕΡΜΟ", "80", "120", "ΚΟΥΖΙΝΑ", 480.0,
+         "ΕΝΕΡΓΕΙΑΚΟ ΠΑΡΑΘΥΡΟ ΜΟΝΟΦΥΛΛΟ ΑΝΟΙΓΟΜΕΝΟ / ΑΝΑΚΛΙΝΟΜΕΝΟ\nΥΑΛΟΠΙΝΑΚΕΣ 4 ΕΠΟΧΩΝ 4mm Planistar Evo-Argon-5mm\nΣΙΤΑ ΚΑΘΕΤΗ ΜΕ ΕΛΑΤΗΡΙΟ\nΠΕΡΙΜΕΤΡΙΚΟΣ ΜΗΧΑΝΙΣΜΟΣ ΑΝΑΚΛΙΣΗΣ",
+         "thumb_m9660_single_casement.png"),
+        ("Π-108", "ΣΤΑΘΕΡΟ ΠΛΑΙΣΙΟ / ΒΙΤΡΙΝΑ", "Σταθερό",
+         "ALUMIL/ALUMIL M9660", "ΑΝΘΡΑΚΙ RAL ΘΕΡΜΟ", "200", "150", "ΧΩΛ", 620.0,
+         "ΕΝΕΡΓΕΙΑΚΟ ΣΤΑΘΕΡΟ ΠΛΑΙΣΙΟ ΤΗΣ ALUMIL\nΥΑΛΟΠΙΝΑΚΕΣ 4 ΕΠΟΧΩΝ 4mm Planistar Evo-Argon-3+3 TRIPLEX\nΥΨΗΛΗ ΘΕΡΜΟΜΟΝΩΣΗ & ΗΧΟΜΟΝΩΣΗ",
+         "thumb_fixed.png"),
+        ("Π-109", "ΠΟΡΤΑ ΕΙΣΟΔΟΥ ΑΛΟΥΜΙΝΙΟΥ", "Πόρτα",
+         "ALUMIL/SMARTIA M11000", "ΑΝΘΡΑΚΙ RAL ΘΕΡΜΟ", "100", "220", "ΚΥΡΙΑ ΕΙΣΟΔΟΣ", 1450.0,
+         "ΠΟΡΤΑ ΕΙΣΟΔΟΥ ΑΛΟΥΜΙΝΙΟΥ ΜΕ ΘΕΡΜΟΔΙΑΚΟΠΗ\nΠΑΝΕΛ ΑΛΟΥΜΙΝΙΟΥ ΒΑΡΕΩΣ ΤΥΠΟΥ INOX ΣΧΕΔΙΟ\nΚΛΕΙΔΑΡΙΑ ΑΣΦΑΛΕΙΑΣ 5 ΣΗΜΕΙΩΝ\nΜΕΝΤΕΣΕΔΕΣ ΒΑΡΕΩΣ ΤΥΠΟΥ 3D ΡΥΘΜΙΖΟΜΕΝΟΙ\nΠΟΜΟΛΟ ΜΠΑΡΑ INOX 80cm",
+         "thumb_door.png"),
+        ("Π-110", "ΔΙΦΥΛΛΟ ΕΠΑΛΛΗΛΟ EUROPA 5500 HYBRID", "Συρόμενο",
+         "EUROPA 5500 HYBRID", "RAL 7016 ΑΝΘΡΑΚΙ", "180", "220", "1ος-ΠΡΟΣΟΨΗ", 1900.0,
+         "ΕΝΕΡΓΕΙΑΚΟ ΚΟΥΦΩΜΑ ΣΥΡΟΜΕΝΟ EUROPA 5500 HYBRID\nΥΑΛΟΠΙΝΑΚΕΣ 4 ΕΠΟΧΩΝ 4mm Planistar Evo-Argon-5mm\nΡΟΛΟ ΑΛΟΥΜΙΝΙΟΥ ΕΠΙΚΑΘΗΜΕΝΟ ΜΕ ΜΟΤΕΡ SOMFY\nΣΙΤΑ ΣΥΡΟΜΕΝΗ ΕΝΙΣΧΥΜΕΝΗ\nΠΟΛΛΑΠΛΑ ΚΛΕΙΔΩΜΑΤΑ ΑΣΦΑΛΕΙΑΣ",
+         "thumb_s350_shutter_screen.png"),
+    ]
+    for p in presets:
+        c.execute("""INSERT INTO designs(code,name,category,series,color,width,height,location,price,descr,image)
+                     VALUES(?,?,?,?,?,?,?,?,?,?,?)""", p)
+
 def init_db():
     c = db()
     c.execute("""CREATE TABLE IF NOT EXISTS materials(
@@ -119,6 +269,12 @@ def init_db():
     dcols = [r[1] for r in c.execute("PRAGMA table_info(designs)").fetchall()]
     if "materials_json" not in dcols:
         c.execute("ALTER TABLE designs ADD COLUMN materials_json TEXT DEFAULT '[]'")
+    if "series" not in dcols:
+        c.execute("ALTER TABLE designs ADD COLUMN series TEXT DEFAULT ''")
+    if "color" not in dcols:
+        c.execute("ALTER TABLE designs ADD COLUMN color TEXT DEFAULT ''")
+    if "location" not in dcols:
+        c.execute("ALTER TABLE designs ADD COLUMN location TEXT DEFAULT ''")
     c.execute("""CREATE TABLE IF NOT EXISTS quotes(
         id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT, date TEXT,
         customer_id INTEGER, customer_name TEXT, customer_info TEXT,
@@ -148,6 +304,8 @@ def init_db():
             ("Τοποθέτηση / Εργασία", "τεμ.", 80.0),
         ]
         c.executemany("INSERT INTO materials(name,unit,price) VALUES(?,?,?)", demo)
+    if c.execute("SELECT COUNT(*) c FROM designs").fetchone()["c"] == 0:
+        seed_default_designs(c)
     c.commit(); c.close()
 
 def get_company():
@@ -246,6 +404,380 @@ def pdf_image(path, max_w=62*mm, max_h=52*mm):
     except Exception:
         return None
 
+# ================= 2D ΣΧΗΜΑΤΙΚΑ (Π x Υ σε εκατοστά) =================
+# Alumil-style elevation: thin gray frames, opening arrows, optional roller / σίτα.
+GLASSC = colors.HexColor("#eef2f5")
+GLASSDIM = colors.HexColor("#d9dee4")
+FRAMEC = colors.HexColor("#9aa3ad")
+FRAMEDK = colors.HexColor("#5b6570")
+HANDLEC = colors.HexColor("#3f3f46")
+ARROWC = colors.HexColor("#27272a")
+HATCHC = colors.HexColor("#8b949e")
+DIMC = colors.HexColor("#94a3b8")
+CAPTIONC = colors.HexColor("#64748b")
+HEADBAR = colors.HexColor("#4b5563")
+PRICEGR = colors.HexColor("#15803d")
+
+def _num(v):
+    """'120' / '120,5' / 120 -> float, αλλιώς None."""
+    try:
+        s = str(v or "").strip().replace(",", ".")
+        return float(s) if s else None
+    except Exception:
+        return None
+
+def fold_el(text):
+    """Lowercase Greek without accents, for matching συρόμενο / δίφυλλο / σίτα…"""
+    try:
+        s = unicodedata.normalize("NFD", str(text or "").lower())
+        return "".join(ch for ch in s if not unicodedata.combining(ch))
+    except Exception:
+        return str(text or "").lower()
+
+def dims_meters_txt(w, h):
+    """Alumil-style 3,3000 x 2,3500 (metres). Values > 10 are treated as cm."""
+    wn, hn = _num(w), _num(h)
+    if wn is None or hn is None:
+        ww = str(w or "").strip() or "-"
+        hh = str(h or "").strip() or "-"
+        return f"{ww} x {hh}"
+    if max(wn, hn) > 10:
+        wn, hn = wn / 100.0, hn / 100.0
+    return f"{wn:.4f} x {hn:.4f}".replace(".", ",")
+
+# Σειρά έχει σημασία: το "μπαλκονόπορτα" περιέχει το "πόρτα".
+_CAT_HINTS = [("συρομεν", "Συρόμενο"), ("επαλληλ", "Συρόμενο"), ("μπαλκον", "Μπαλκονόπορτα"),
+              ("βιτριν", "Βιτρίνα"), ("ντουλαπ", "Ντουλάπα"),
+              ("σταθερ", "Σταθερό"), ("παραθυρ", "Παράθυρο"), ("φεγγιτ", "Παράθυρο"),
+              ("πορτα", "Πόρτα"), ("κουφωμα", "Παράθυρο")]
+
+def guess_category(text, fallback=""):
+    """Κατηγορία από ελεύθερο κείμενο γραμμής (χωρίς τόνους), αλλιώς το υπάρχον."""
+    if fallback and fallback != "Άλλο":
+        return fallback
+    s = fold_el(text)
+    for key, cat in _CAT_HINTS:
+        if key in s:
+            return cat
+    return fallback or ""
+
+def resolved_category(d):
+    """Κατηγορία που θα χρησιμοποιηθεί για το σχέδιο: η αποθηκευμένη, ή αν
+    λείπει/είναι «Άλλο» αυτή που προκύπτει από το όνομα της γραμμής."""
+    cat = str(d.get("category") or "").strip()
+    if cat and cat != "Άλλο":
+        return cat
+    return guess_category(d.get("name", ""), "") or cat
+
+class Schematic(Flowable):
+    """Alumil-style 2D elevation: frame, sashes, opening arrows, roller, σίτα.
+    Aspect ratio follows Π x Υ (cm). Extra caption under the drawing."""
+
+    BOX_W = 62*mm
+    BOX_H = 62*mm
+
+    def __init__(self, w_cm, h_cm, category="", label=None, w_txt=None, h_txt=None,
+                 name="", descr="", location=""):
+        Flowable.__init__(self)
+        self.w_cm = float(w_cm)
+        self.h_cm = float(h_cm)
+        self.cat = str(category or "").strip()
+        self.name = str(name or "")
+        self.descr = str(descr or "")
+        self.location = str(location or "").strip()
+        self.w_txt = str(w_txt) if w_txt is not None else f"{self.w_cm:g}"
+        self.h_txt = str(h_txt) if h_txt is not None else f"{self.h_cm:g}"
+        self.label = label or f"{self.w_txt} x {self.h_txt} εκ."
+        self.feat = self._features()
+        self.pad_l = 8*mm
+        self.pad_t = 6.5*mm
+        self.pad_b = 7.5*mm
+        shutter_h = 7.2*mm if self.feat["shutter"] else 0
+        aw = self.BOX_W - self.pad_l - 3*mm
+        ah = self.BOX_H - self.pad_t - self.pad_b - shutter_h
+        s = min(aw / self.w_cm, ah / self.h_cm)
+        self.iw = self.w_cm * s
+        self.ih = self.h_cm * s
+        # keep arrows readable on very wide/low transoms (φεγγίτες)
+        min_ih = 20*mm
+        if self.ih < min_ih and self.h_cm > 0:
+            s2 = min_ih / self.h_cm
+            if self.w_cm * s2 <= aw:
+                self.iw = self.w_cm * s2
+                self.ih = min_ih
+            else:
+                self.ih = min(min_ih, ah)
+        self.shutter_h = shutter_h
+        self.width = self.BOX_W
+        self.height = min(self.BOX_H, self.pad_b + self.ih + self.shutter_h + self.pad_t)
+
+    def wrap(self, aW=None, aH=None):
+        return self.width, self.height
+
+    def _features(self):
+        blob = fold_el(" ".join([self.cat, self.name, self.descr]))
+        name_b = fold_el(self.name)
+        shutter = any(k in blob for k in ("ρολο", "ρολλ"))
+        screen = "σιτα" in blob
+        sliding = self.cat == "Συρόμενο" or any(k in blob for k in ("συρομεν", "επαλληλ"))
+        tilt = "φεγγιτ" in blob
+        door = self.cat in ("Πόρτα", "Μπαλκονόπορτα") or any(k in blob for k in ("πορτα", "μπαλκον"))
+        leaf_src = name_b if any(k in name_b for k in ("φυλλ", "φυλο")) else blob
+        if "τριφυλλ" in leaf_src:
+            leaves = 3
+        elif "μονοφυλλ" in leaf_src:
+            leaves = 1
+        elif "διφυλλ" in leaf_src:
+            leaves = 2
+        elif self.cat == "Σταθερό":
+            leaves = 1
+        elif self.cat in ("Συρόμενο", "Μπαλκονόπορτα", "Ντουλάπα"):
+            leaves = 3 if self.w_cm > 200 else 2
+        elif self.cat == "Βιτρίνα":
+            leaves = 3 if self.w_cm > 180 else 2
+        else:
+            leaves = 2
+        return {"shutter": shutter, "screen": screen, "sliding": sliding,
+                "tilt": tilt, "door": door, "leaves": max(1, leaves)}
+
+    def _arrow(self, c, x, y, direction, size):
+        p = c.beginPath()
+        s = size
+        if direction == "R":
+            p.moveTo(x, y)
+            p.lineTo(x - s, y + s * 0.58)
+            p.lineTo(x - s, y - s * 0.58)
+        elif direction == "L":
+            p.moveTo(x, y)
+            p.lineTo(x + s, y + s * 0.58)
+            p.lineTo(x + s, y - s * 0.58)
+        elif direction == "U":
+            p.moveTo(x, y)
+            p.lineTo(x - s * 0.58, y - s)
+            p.lineTo(x + s * 0.58, y - s)
+        else:
+            p.moveTo(x, y)
+            p.lineTo(x - s * 0.58, y + s)
+            p.lineTo(x + s * 0.58, y + s)
+        p.close()
+        c.setFillColor(ARROWC)
+        c.drawPath(p, fill=1, stroke=0)
+
+    def _hatch_v(self, c, x, y, w, h, step=1.15*mm):
+        if w <= 0 or h <= 0:
+            return
+        c.saveState()
+        p = c.beginPath()
+        p.rect(x, y, w, h)
+        c.clipPath(p, stroke=0, fill=0)
+        c.setStrokeColor(HATCHC)
+        c.setLineWidth(0.35)
+        xx = x
+        while xx <= x + w:
+            c.line(xx, y, xx, y + h)
+            xx += step
+        c.restoreState()
+
+    def _hatch_h(self, c, x, y, w, h, step=1.05*mm):
+        if w <= 0 or h <= 0:
+            return
+        c.saveState()
+        p = c.beginPath()
+        p.rect(x, y, w, h)
+        c.clipPath(p, stroke=0, fill=0)
+        c.setStrokeColor(FRAMEDK)
+        c.setLineWidth(0.4)
+        yy = y + step * 0.6
+        while yy < y + h:
+            c.line(x, yy, x + w, yy)
+            yy += step
+        c.restoreState()
+
+    def draw(self):
+        c = self.canv
+        f = self.feat
+        n = f["leaves"]
+        iw, ih = self.iw, self.ih
+        x0 = self.pad_l + (self.BOX_W - self.pad_l - 3*mm - iw) / 2.0
+        y0 = self.pad_b + 1*mm
+        ft = max(1.1*mm, min(2.4*mm, min(iw, ih) / 12.0))
+        mt = max(1.2*mm, ft * 0.85)
+
+        # --- roller box sits on top of the frame ---
+        if f["shutter"]:
+            sh = self.shutter_h
+            c.setFillColor(FRAMEC)
+            c.setStrokeColor(FRAMEDK)
+            c.setLineWidth(0.6)
+            c.rect(x0, y0 + ih, iw, sh, stroke=1, fill=1)
+            self._hatch_h(c, x0 + 0.5*mm, y0 + ih + 0.4*mm, iw - 1*mm, sh - 0.8*mm, 1.15*mm)
+            # small motor box on the right
+            mw = min(6*mm, iw * 0.14)
+            c.setFillColor(colors.HexColor("#7b848d"))
+            c.rect(x0 + iw - mw, y0 + ih, mw, sh, stroke=1, fill=1)
+
+        # outer frame
+        c.setFillColor(FRAMEC)
+        c.setStrokeColor(FRAMEDK)
+        c.setLineWidth(0.7)
+        c.setLineJoin(1)
+        c.rect(x0, y0, iw, ih, stroke=1, fill=1)
+
+        gx, gy = x0 + ft, y0 + ft
+        gw, gh = max(0.0, iw - 2 * ft), max(0.0, ih - 2 * ft)
+        c.setFillColor(GLASSC)
+        c.rect(gx, gy, gw, gh, stroke=0, fill=1)
+
+        # sash rectangles
+        leaf_w = gw / float(n) if n else gw
+        for i in range(n):
+            lx = gx + i * leaf_w
+            # inner rebate
+            c.setStrokeColor(FRAMEDK)
+            c.setFillColor(FRAMEC)
+            c.setLineWidth(0.5)
+            if i > 0:
+                c.rect(lx - mt / 2.0, gy, mt, gh, stroke=0, fill=1)
+            inset = max(0.7*mm, ft * 0.45)
+            c.setFillColor(GLASSDIM if (f["screen"] and i == n - 1) else GLASSC)
+            c.rect(lx + inset, gy + inset, max(0, leaf_w - 2 * inset), max(0, gh - 2 * inset),
+                   stroke=0, fill=1)
+            c.setStrokeColor(FRAMEDK)
+            c.rect(lx + inset * 0.3, gy + inset * 0.3,
+                   max(0, leaf_w - 0.6 * inset), max(0, gh - 0.6 * inset), stroke=1, fill=0)
+
+            glass_x = lx + inset
+            glass_y = gy + inset
+            glass_w = max(0, leaf_w - 2 * inset)
+            glass_h = max(0, gh - 2 * inset)
+
+            if f["screen"] and i == n - 1:
+                self._hatch_v(c, glass_x, glass_y, glass_w, glass_h, 0.95*mm)
+
+            # opening indicators
+            if glass_w > 4*mm and glass_h > 6*mm and self.cat != "Σταθερό":
+                az = min(4.2*mm, glass_w * 0.28, glass_h * 0.18)
+                cy = glass_y + glass_h * 0.52
+                is_transom = f["tilt"] or (n == 1 and ("φεγγιτ" in fold_el(self.name) or "φεγγιτ" in fold_el(self.descr)))
+                if is_transom:
+                    # Transom / Tilt triangle opening lines (DIN/ISO architectural symbol, exactly as in Item 3)
+                    c.saveState()
+                    c.setStrokeColor(colors.HexColor("#334155"))
+                    c.setLineWidth(0.65)
+                    p = c.beginPath()
+                    p.moveTo(glass_x + 1.2*mm, glass_y + glass_h - 1.2*mm)
+                    p.lineTo(glass_x + glass_w * 0.5, glass_y + 1.2*mm)
+                    p.lineTo(glass_x + glass_w - 1.2*mm, glass_y + glass_h - 1.2*mm)
+                    c.drawPath(p, fill=0, stroke=1)
+                    # small latch
+                    c.setFillColor(HANDLEC)
+                    c.rect(glass_x + glass_w * 0.5 - 1.2*mm, glass_y + 0.8*mm, 2.4*mm, 0.9*mm, stroke=0, fill=1)
+                    c.restoreState()
+                elif f["sliding"] or self.cat == "Συρόμενο":
+                    if n == 1:
+                        self._arrow(c, glass_x + glass_w * 0.72, cy, "R", az)
+                    elif i == 0:
+                        self._arrow(c, glass_x + glass_w * 0.72, cy, "R", az)
+                    elif i == n - 1:
+                        self._arrow(c, glass_x + glass_w * 0.28, cy, "L", az)
+                    else:
+                        self._arrow(c, glass_x + glass_w * 0.35, cy, "L", az * 0.8)
+                        self._arrow(c, glass_x + glass_w * 0.65, cy, "R", az * 0.8)
+                else:
+                    # Casement opening lines (triangular lines from hinges to handle, exactly as in Item 4)
+                    c.saveState()
+                    c.setStrokeColor(colors.HexColor("#334155"))
+                    c.setLineWidth(0.65)
+                    p = c.beginPath()
+                    if n == 1:
+                        p.moveTo(glass_x + 1*mm, glass_y + 1*mm)
+                        p.lineTo(glass_x + glass_w - 1*mm, cy)
+                        p.lineTo(glass_x + 1*mm, glass_y + glass_h - 1*mm)
+                    elif i == 0:
+                        # left leaf hinges on left, handle on right meeting stile
+                        p.moveTo(glass_x + 1*mm, glass_y + 1*mm)
+                        p.lineTo(glass_x + glass_w - 0.5*mm, cy)
+                        p.lineTo(glass_x + 1*mm, glass_y + glass_h - 1*mm)
+                        # handle on meeting stile
+                        c.setFillColor(HANDLEC)
+                        c.rect(glass_x + glass_w - 1.2*mm, cy - 2.5*mm, 1.0*mm, 5.0*mm, stroke=0, fill=1)
+                    else:
+                        # right leaf hinges on right, handle on left meeting stile
+                        p.moveTo(glass_x + glass_w - 1*mm, glass_y + 1*mm)
+                        p.lineTo(glass_x + 0.5*mm, cy)
+                        p.lineTo(glass_x + glass_w - 1*mm, glass_y + glass_h - 1*mm)
+                        # handle on meeting stile
+                        c.setFillColor(HANDLEC)
+                        c.rect(glass_x + 0.2*mm, cy - 2.5*mm, 1.0*mm, 5.0*mm, stroke=0, fill=1)
+                    c.drawPath(p, fill=0, stroke=1)
+                    c.restoreState()
+
+        if self.cat in ("Βιτρίνα", "Ντουλάπα") and gw > 0 and gh > 3 * mt:
+            c.setFillColor(FRAMEC)
+            by = (gy + gh / 2.0 - mt / 2.0) if self.cat == "Βιτρίνα" else (gy + gh * 0.80)
+            c.rect(gx, by, gw, mt, stroke=0, fill=1)
+
+        if f["door"] and gw > 5*mm and gh > 6*mm:
+            c.setFillColor(HANDLEC)
+            hw = max(0.7*mm, mt * 0.5)
+            hx = x0 + iw - ft - max(2.2*mm, gw * 0.10)
+            c.rect(hx, gy + gh * 0.42, hw, min(11*mm, gh * 0.22), stroke=0, fill=1)
+
+        c.setStrokeColor(FRAMEDK)
+        c.setLineWidth(0.85)
+        c.rect(x0, y0, iw, ih, stroke=1, fill=0)
+
+        # dimensions (small, outside)
+        c.setStrokeColor(DIMC)
+        c.setLineWidth(0.45)
+        c.setFillColor(DIMC)
+        top_y = y0 + ih + (self.shutter_h if f["shutter"] else 0) + 2.2*mm
+        if top_y + 3*mm < self.BOX_H:
+            c.line(x0, top_y, x0 + iw, top_y)
+            for xx in (x0, x0 + iw):
+                c.line(xx, top_y - 0.9*mm, xx, top_y + 0.9*mm)
+            c.setFont(FONT, 6.5)
+            c.drawCentredString(x0 + iw / 2.0, top_y + 1.2*mm, self.w_txt)
+        lx = x0 - 2.3*mm
+        c.line(lx, y0, lx, y0 + ih)
+        for yy in (y0, y0 + ih):
+            c.line(lx - 0.9*mm, yy, lx + 0.9*mm, yy)
+        c.saveState()
+        c.setFont(FONT, 6.5)
+        c.translate(lx - 1.5*mm, y0 + ih / 2.0)
+        c.rotate(90)
+        c.drawCentredString(0, 0, self.h_txt)
+        c.restoreState()
+
+        cap = self.location
+        if cap:
+            cap = f"Τοποθέτηση: {cap}"
+        else:
+            cap = self.label
+        c.setFont(FONT, 6.5)
+        c.setFillColor(CAPTIONC)
+        c.drawCentredString(self.BOX_W / 2.0, 1.6*mm, cap[:42])
+
+def schematic_for(d):
+    """Schematic αν η γραμμή έχει αριθμητικές διαστάσεις, αλλιώς None."""
+    w = _num(d.get("width"))
+    h = _num(d.get("height"))
+    if not w or not h or w <= 0 or h <= 0:
+        return None
+    try:
+        k = min(1.0, 20000.0 / max(w, h))
+        wt = str(d.get("width") or "").strip()[:12]
+        ht = str(d.get("height") or "").strip()[:12]
+        return Schematic(
+            w * k, h * k, resolved_category(d),
+            w_txt=wt, h_txt=ht,
+            name=d.get("name", "") or "",
+            descr=d.get("descr", "") or "",
+            location=d.get("location", "") or "",
+        )
+    except Exception:
+        return None
+
 def _footer(canvas, doc):
     canvas.saveState()
     try:
@@ -280,6 +812,11 @@ def make_pdf(q, filepath):
     st_right = ParagraphStyle('r', fontName=FONT, fontSize=10, leading=14, alignment=2)
     st_total = ParagraphStyle('rt', fontName=FONTB, fontSize=13, leading=16, alignment=2, textColor=colors.white)
     st_d = ParagraphStyle('d', fontName=FONT, fontSize=9, leading=12, textColor=DARK)
+    st_cardh = ParagraphStyle('cardh', fontName=FONTB, fontSize=9, leading=12, textColor=colors.white)
+    st_th2 = ParagraphStyle('th2', fontName=FONTB, fontSize=7.5, leading=10, textColor=colors.HexColor("#334155"))
+    st_td2 = ParagraphStyle('td2', fontName=FONT, fontSize=8, leading=11, textColor=DARK)
+    st_spec = ParagraphStyle('spec', fontName=FONT, fontSize=7.5, leading=10, textColor=colors.HexColor("#1e293b"))
+    st_price = ParagraphStyle('pr', fontName=FONTB, fontSize=14, leading=18, alignment=2, textColor=PRICEGR)
 
     story = []
     logo = get_logo()
@@ -342,32 +879,88 @@ def make_pdf(q, filepath):
         story.append(Spacer(1, 10))
 
     if designs:
-        story.append(Paragraph("ΣΧΕΔΙΑ / ΚΑΤΑΣΚΕΥΕΣ", st_h))
+        story.append(Paragraph("ΚΟΥΦΩΜΑΤΑ / ΚΑΤΑΣΚΕΥΕΣ", st_h))
         story.append(Spacer(1, 4))
-        for d in designs:
+        for idx, d in enumerate(designs, start=1):
             pth = img_path(d.get("image", ""))
-            im = pdf_image(pth) if pth else None
-            dims = f"{esc(d.get('width',''))} x {esc(d.get('height',''))} εκ." if d.get("width") or d.get("height") else "-"
+            im = pdf_image(pth, max_w=58*mm, max_h=52*mm) if pth else None
+            sch = schematic_for(d)
+            art = sch or im or Paragraph("(χωρίς σχέδιο)", st_small)
             try:
                 dq = float(d.get("qty", 1) or 1)
             except Exception:
                 dq = 1
-            info = (f"<b>{esc(d.get('code',''))} - {esc(d.get('name',''))}</b><br/>"
-                    f"Κατηγορία: {esc(d.get('category',''))}<br/>"
-                    f"Διαστάσεις (Π x Υ): <b>{dims}</b><br/>"
-                    f"Τεμάχια: <b>{dq:g}</b>")
-            if d.get("descr"):
-                info += f"<br/><font size=8>{esc(d.get('descr',''))}</font>"
-            cells = [[im or Paragraph("(χωρίς εικόνα)", st_small), Paragraph(info, st_d)]]
-            dt = Table(cells, colWidths=[70*mm, 100*mm])
-            dt.setStyle(TableStyle([
-                ('GRID', (0, 0), (-1, -1), 0.4, colors.HexColor("#cbd5e1")),
-                ('BACKGROUND', (0, 0), (-1, -1), colors.white),
+            code = str(d.get("code") or "").strip()
+            raw_name = str(d.get("name") or "").strip() or "Κούφωμα"
+            title = f"{idx}. {raw_name.upper()}"
+            if code:
+                title += f"  ({code})"
+            series = str(d.get("series") or d.get("category") or "—").strip() or "—"
+            color = str(d.get("color") or "—").strip() or "—"
+            dim_txt = dims_meters_txt(d.get("width"), d.get("height"))
+            spec = Table([
+                [Paragraph("Σειρά", st_th2), Paragraph("Χρώμα", st_th2),
+                 Paragraph("Πλάτος x Ύψος", st_th2)],
+                [Paragraph(esc(series), st_td2), Paragraph(esc(color), st_td2),
+                 Paragraph(esc(dim_txt), st_td2)],
+            ], colWidths=[34*mm, 36*mm, 34*mm])
+            spec.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#e2e8f0")),
+                ('GRID', (0, 0), (-1, -1), 0.35, colors.HexColor("#94a3b8")),
                 ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('TOPPADDING', (0, 0), (-1, -1), 6), ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                ('LEFTPADDING', (0, 0), (-1, -1), 6), ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+                ('TOPPADDING', (0, 0), (-1, -1), 3),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                ('LEFTPADDING', (0, 0), (-1, -1), 4),
             ]))
-            parts = [dt]
+            raw_descr = str(d.get("descr") or "").strip()
+            clean_lines = [esc(line.strip()) for line in raw_descr.splitlines() if line.strip()]
+            if dq and dq != 1:
+                clean_lines.append(f"<b>Τεμάχια:</b> {dq:g}")
+            formatted_desc = "<br/>".join(clean_lines) if clean_lines else "&nbsp;"
+            desc_p = Paragraph(formatted_desc, st_spec)
+            try:
+                unit_price = float(d.get("price", 0) or 0)
+            except Exception:
+                unit_price = 0
+            price_cell = Paragraph(fmt(unit_price * dq) if unit_price else "", st_price)
+            right = Table([[spec], [desc_p], [price_cell]], colWidths=[104*mm])
+            right.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('TOPPADDING', (0, 0), (-1, -1), 2),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+                ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+                ('ALIGN', (0, 2), (0, 2), 'RIGHT'),
+            ]))
+            body = Table([[art, right]], colWidths=[66*mm, 106*mm])
+            body.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 4),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+                ('TOPPADDING', (0, 0), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                ('BACKGROUND', (0, 0), (-1, -1), colors.white),
+            ]))
+            # plain string: Paragraph mini-HTML would eat letters (e.g. ΦΕΓΓΙΤΗΣ)
+            head = Table([[title]], colWidths=[172*mm])
+            head.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, -1), HEADBAR),
+                ('TEXTCOLOR', (0, 0), (-1, -1), colors.white),
+                ('FONTNAME', (0, 0), (-1, -1), FONTB),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('LEFTPADDING', (0, 0), (-1, -1), 8),
+            ]))
+            card = Table([[head], [body]], colWidths=[172*mm])
+            card.setStyle(TableStyle([
+                ('BOX', (0, 0), (-1, -1), 0.6, colors.HexColor("#64748b")),
+                ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+                ('TOPPADDING', (0, 0), (-1, -1), 0),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+            ]))
+            parts = [card]
             dm = d.get("materials") or []
             if isinstance(dm, str):
                 try:
@@ -401,7 +994,7 @@ def make_pdf(q, filepath):
                 parts.append(Spacer(1, 3))
                 parts.append(mt)
             story.append(KeepTogether(parts))
-            story.append(Spacer(1, 6))
+            story.append(Spacer(1, 5))
 
     totals = [
         [Paragraph("Αρχική Αξία (χωρίς ΦΠΑ):", st_right), Paragraph(fmt(q["subtotal"]), st_right)],
@@ -434,7 +1027,7 @@ ctk.set_default_color_theme("blue")
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("AluminaOffers")
+        self.title(f"AluminaOffers v{__version__}")
         self.geometry("1220x740")
         self.minsize(1060, 660)
         self._catalog_tab = "Σχέδια"
@@ -451,7 +1044,7 @@ class App(ctk.CTk):
         self._brand_name = ctk.CTkLabel(brand, text="AluminaOffers", font=("Arial", 17, "bold"),
                                        text_color="white", anchor="w")
         self._brand_name.pack(anchor="w")
-        ctk.CTkLabel(brand, text="Προσφορές αλουμινάδων", font=("Arial", 12),
+        ctk.CTkLabel(brand, text=f"Προσφορές αλουμινάδων • v{__version__}", font=("Arial", 11),
                      text_color="#93c5fd", anchor="w").pack(anchor="w", pady=(0, 14))
         self.nav_btns = {}
         for key, txt in [("home", "🏠  Αρχική"), ("new", "➕  Νέα Προσφορά"),
@@ -670,7 +1263,9 @@ class App(ctk.CTk):
         ctk.CTkLabel(f1, text="Νο:", font=("Arial", 13, "bold")).pack(side="left")
         e_num = ctk.CTkEntry(f1, width=80, font=("Arial", 14)); e_num.insert(0, nxt); e_num.pack(side="left", padx=6)
         ctk.CTkLabel(f1, text="Πελάτης:", font=("Arial", 13, "bold")).pack(side="left", padx=(10, 0))
-        cb_cust = ctk.CTkComboBox(f1, values=[x["name"] for x in custs], width=220, font=("Arial", 13))
+        # values=[] → το CTkComboBox επιστρέφει κυριολεκτικά το "CTkComboBox"
+        # και μπορεί να αποθηκευτεί ως όνομα πελάτη. Άρα πάντα τουλάχιστον [""].
+        cb_cust = ctk.CTkComboBox(f1, values=[x["name"] for x in custs] or [""], width=220, font=("Arial", 13))
         cb_cust.pack(side="left", padx=6)
         e_phone = ctk.CTkEntry(f1, width=150, placeholder_text="Τηλέφωνο", font=("Arial", 13))
         e_phone.pack(side="left", padx=6)
@@ -685,8 +1280,8 @@ class App(ctk.CTk):
 
         mid = self.card(wrap)
         hdr = ctk.CTkFrame(mid, fg_color=CARD); hdr.pack(fill="x", padx=14, pady=(10, 0))
-        for txt, w in [("Περιγραφή (γράψε ελεύθερα)", 290), ("", 42), ("Π εκ.", 62),
-                       ("Υ εκ.", 62), ("Τεμ", 56), ("Τιμή €", 86), ("Σύνολο", 96)]:
+        for txt, w in [("Σχέδιο / Τύπος (πάτα για αναζήτηση)", 280), ("Π εκ.", 58),
+                       ("Υ εκ.", 58), ("Τοποθέτηση", 125), ("Τεμ", 44), ("Τιμή €", 82), ("Σύνολο", 92), ("", 95)]:
             ctk.CTkLabel(hdr, text=txt, font=("Arial", 12, "bold"), width=w, text_color=TXTG).pack(side="left", padx=3)
         rowsbox = ctk.CTkFrame(mid, fg_color=CARD); rowsbox.pack(fill="x", padx=14, pady=4)
         rows = []
@@ -722,86 +1317,267 @@ class App(ctk.CTk):
 
         def pick_design(row):
             win = ctk.CTkToplevel(self)
-            win.title("Διάλεξε σχέδιο"); win.geometry("440x520"); win.grab_set()
-            e_s = ctk.CTkEntry(win, placeholder_text="🔍 Αναζήτηση...", font=("Arial", 13))
-            e_s.pack(fill="x", padx=12, pady=10)
-            lst = ctk.CTkScrollableFrame(win, fg_color="white", height=400)
-            lst.pack(fill="both", expand=True, padx=12, pady=6)
+            win.title("📐 Κατάλογος Κουφωμάτων & Σχεδίων")
+            win.geometry("820x620")
+            win.after(100, lambda: win.grab_set() if win.winfo_exists() else None)
+            
+            top_bar = ctk.CTkFrame(win, fg_color="transparent")
+            top_bar.pack(fill="x", padx=14, pady=(12, 6))
+            e_s = ctk.CTkEntry(top_bar, placeholder_text="🔍 Αναζήτηση (π.χ. επάλληλο, φεγγίτης, ρολό, S350, M9660, Europa)...",
+                               font=("Arial", 14), height=38)
+            e_s.pack(fill="x")
+
+            cats_bar = ctk.CTkFrame(win, fg_color="transparent")
+            cats_bar.pack(fill="x", padx=14, pady=(0, 6))
+            active_cat = {"v": "Όλα"}
+            cat_btns = []
+
+            lst = ctk.CTkScrollableFrame(win, fg_color="#f8fafc", corner_radius=10, height=480)
+            lst.pack(fill="both", expand=True, padx=14, pady=(0, 12))
+            
+            picker_thumbs = []
 
             def choose(d):
-                if not row["e_desc"].get().strip():
-                    row["e_desc"].delete(0, "end")
-                    row["e_desc"].insert(0, f"{d['code']} {d['name']}")
-                row["e_w"].delete(0, "end"); row["e_w"].insert(0, d.get("width", "") or "")
-                row["e_h"].delete(0, "end"); row["e_h"].insert(0, d.get("height", "") or "")
-                row["code"] = d["code"]; row["image"] = d.get("image", "") or ""
+                row["code"] = d.get("code", "")
+                row["name"] = d.get("name", "")
                 row["category"] = d.get("category", "") or ""
+                row["series"] = d.get("series", "") or ""
+                row["color"] = d.get("color", "") or ""
+                row["descr"] = d.get("descr", "") or ""
+                row["image"] = d.get("image", "") or ""
+                
+                if d.get("width") and not row["e_w"].get().strip():
+                    row["e_w"].delete(0, "end"); row["e_w"].insert(0, str(d["width"]))
+                if d.get("height") and not row["e_h"].get().strip():
+                    row["e_h"].delete(0, "end"); row["e_h"].insert(0, str(d["height"]))
+                if d.get("location") and not row["e_loc"].get().strip():
+                    row["e_loc"].delete(0, "end"); row["e_loc"].insert(0, str(d["location"]))
+                if d.get("price") and not row["e_p"].get().strip():
+                    pr_val = float(d["price"])
+                    row["e_p"].delete(0, "end")
+                    row["e_p"].insert(0, str(int(pr_val) if pr_val == int(pr_val) else pr_val))
+                
                 try:
                     _dm = d.get("materials_json", []) or []
                     row["materials"] = json.loads(_dm) if isinstance(_dm, str) else list(_dm)
                 except Exception:
                     row["materials"] = []
-                row["b_des"].configure(fg_color=GREEN)
-                refresh(); win.destroy()
+
+                short_label = f"✔ {d.get('code','')} {d.get('name','')}".strip()
+                if len(short_label) > 30:
+                    short_label = short_label[:29] + "…"
+                row["b_des"].configure(text=short_label, fg_color=GREEN, hover_color="#15803d")
+                refresh()
+                win.destroy()
+                row["e_w"].focus_set()
 
             def fill(q=""):
                 for w in lst.winfo_children():
                     w.destroy()
-                q = (q or "").lower()
+                picker_thumbs.clear()
+                q = fold_el(q.strip())
+                cat_filter = active_cat["v"]
+                c = db()
+                all_des = [dict(r) for r in c.execute("SELECT * FROM designs ORDER BY id ASC").fetchall()]
+                c.close()
                 n = 0
-                for d in des:
-                    if q and q not in ((d["code"] or "") + " " + (d["name"] or "")).lower():
+                for d in all_des:
+                    if cat_filter != "Όλα" and d.get("category") != cat_filter:
+                        continue
+                    blob = fold_el(" ".join([d.get("code") or "", d.get("name") or "", d.get("series") or "",
+                                             d.get("category") or "", d.get("descr") or ""]))
+                    if q and q not in blob:
                         continue
                     n += 1
-                    if n > 150:
-                        break
-                    dims = f"{d['width'] or '-'}x{d['height'] or '-'}"
-                    try:
-                        _mm = d.get("materials_json", []) or []
-                        _mm = json.loads(_mm) if isinstance(_mm, str) else _mm
-                    except Exception:
-                        _mm = []
-                    tag = f" • {len(_mm)} υλικά" if _mm else ""
-                    ctk.CTkButton(lst, text=f"{d['code']} — {d['name']} ({dims}){tag}", anchor="w",
-                                  font=("Arial", 12), fg_color=ROWB, text_color=TXTD,
-                                  hover_color="#dbeafe",
-                                  command=lambda dd=dict(d): choose(dd)).pack(fill="x", pady=2)
+                    card = ctk.CTkFrame(lst, fg_color="white", corner_radius=10, border_width=1, border_color="#e2e8f0")
+                    card.pack(fill="x", pady=4, padx=4)
+
+                    # Thumbnail
+                    pth = img_path(d.get("image"))
+                    if pth:
+                        try:
+                            with PILImage.open(pth) as im:
+                                w0, h0 = im.size
+                            s = min(95 / w0, 75 / h0)
+                            ph = ctk.CTkImage(light_image=PILImage.open(pth), size=(max(20, int(w0 * s)), max(20, int(h0 * s))))
+                            picker_thumbs.append(ph)
+                            ctk.CTkLabel(card, text="", image=ph, width=105).pack(side="left", padx=8, pady=6)
+                        except Exception:
+                            ctk.CTkLabel(card, text="📐", font=("Arial", 22), width=105, text_color="#94a3b8").pack(side="left", padx=8, pady=6)
+                    else:
+                        ctk.CTkLabel(card, text="📐", font=("Arial", 22), width=105, text_color="#94a3b8").pack(side="left", padx=8, pady=6)
+
+                    # Info
+                    info = ctk.CTkFrame(card, fg_color="transparent")
+                    info.pack(side="left", fill="both", expand=True, padx=6, pady=6)
+                    
+                    ctk.CTkLabel(info, text=f"{d.get('code','')} — {d.get('name','')}",
+                                 font=("Arial", 13, "bold"), text_color=TXTD, anchor="w").pack(fill="x")
+                    
+                    sub = f"Σειρά: {d.get('series') or '—'}   •   Χρώμα: {d.get('color') or '—'}"
+                    if d.get("width") and d.get("height"):
+                        sub += f"   •   {d['width']}x{d['height']} εκ."
+                    ctk.CTkLabel(info, text=sub, font=("Arial", 11, "bold"), text_color=BLUEH, anchor="w").pack(fill="x", pady=(2, 2))
+                    
+                    specs_prev = " • ".join([line.strip() for line in (d.get("descr") or "").splitlines() if line.strip()][:2])
+                    if specs_prev:
+                        ctk.CTkLabel(info, text=specs_prev, font=("Arial", 10), text_color="#64748b", anchor="w").pack(fill="x")
+
+                    # Select button
+                    btn_frame = ctk.CTkFrame(card, fg_color="transparent")
+                    btn_frame.pack(side="right", padx=10, pady=8)
+                    if d.get("price"):
+                        ctk.CTkLabel(btn_frame, text=fmt(d["price"]), font=("Arial", 12, "bold"), text_color=GREEN).pack(pady=(0, 4))
+                    ctk.CTkButton(btn_frame, text="ΕΠΙΛΟΓΗ ➔", font=("Arial", 12, "bold"),
+                                  fg_color="#16a34a", hover_color="#15803d", width=100, height=36,
+                                  command=lambda dd=d: choose(dd)).pack()
                 if n == 0:
-                    ctk.CTkLabel(lst, text="Δεν βρέθηκε σχέδιο", font=("Arial", 12)).pack(pady=20)
+                    ctk.CTkLabel(lst, text="Δεν βρέθηκε σχέδιο με αυτή την αναζήτηση.", font=("Arial", 13), text_color=TXTG).pack(pady=40)
+
+            def set_cat(c_val):
+                active_cat["v"] = c_val
+                for b, cv in cat_btns:
+                    b.configure(fg_color=BLUEH if cv == c_val else "#e2e8f0",
+                                text_color="white" if cv == c_val else TXTD)
+                fill(e_s.get())
+
+            for cv in ["Όλα", "Συρόμενο", "Παράθυρο", "Μπαλκονόπορτα", "Πόρτα", "Σταθερό"]:
+                btn = ctk.CTkButton(cats_bar, text=cv, font=("Arial", 11, "bold"), height=26,
+                                    fg_color=BLUEH if cv == "Όλα" else "#e2e8f0",
+                                    text_color="white" if cv == "Όλα" else TXTD,
+                                    command=lambda val=cv: set_cat(val))
+                btn.pack(side="left", padx=2)
+                cat_btns.append((btn, cv))
+
             e_s.bind("<KeyRelease>", lambda e: fill(e_s.get()))
             fill()
+
+        def edit_details(row):
+            win_ed = ctk.CTkToplevel(self)
+            win_ed.title("⚙️ Προδιαγραφές & Υλικά Κουφώματος")
+            win_ed.geometry("540x560")
+            win_ed.after(100, lambda: win_ed.grab_set() if win_ed.winfo_exists() else None)
+            
+            pnl = ctk.CTkScrollableFrame(win_ed, fg_color="white")
+            pnl.pack(fill="both", expand=True, padx=12, pady=12)
+
+            ctk.CTkLabel(pnl, text="Σειρά Κουφώματος:", font=("Arial", 12, "bold")).pack(anchor="w")
+            e_ser = ctk.CTkEntry(pnl, width=480, font=("Arial", 13))
+            e_ser.insert(0, row.get("series", "") or "")
+            e_ser.pack(pady=(2, 8))
+
+            ctk.CTkLabel(pnl, text="Χρώμα:", font=("Arial", 12, "bold")).pack(anchor="w")
+            e_col = ctk.CTkEntry(pnl, width=480, font=("Arial", 13))
+            e_col.insert(0, row.get("color", "") or "")
+            e_col.pack(pady=(2, 8))
+
+            ctk.CTkLabel(pnl, text="Τοποθέτηση (π.χ. 1ος-ΓΩΝΙΑΚΟ, ΙΣΟΓΕΙΟ):", font=("Arial", 12, "bold")).pack(anchor="w")
+            e_lc = ctk.CTkEntry(pnl, width=480, font=("Arial", 13))
+            e_lc.insert(0, row["e_loc"].get().strip())
+            e_lc.pack(pady=(2, 8))
+
+            ctk.CTkLabel(pnl, text="Αναλυτικές Προδιαγραφές / Υλικά (όπως φαίνονται στο PDF):",
+                         font=("Arial", 12, "bold")).pack(anchor="w")
+            txt_box = ctk.CTkTextbox(pnl, width=480, height=160, font=("Arial", 12))
+            txt_box.insert("1.0", row.get("descr", "") or "")
+            txt_box.pack(pady=(2, 8))
+
+            quick_bar = ctk.CTkFrame(pnl, fg_color="transparent")
+            quick_bar.pack(fill="x", pady=(0, 10))
+            def add_spec(text):
+                cur = txt_box.get("1.0", "end").strip()
+                if cur:
+                    txt_box.insert("end", f"\n{text}")
+                else:
+                    txt_box.insert("1.0", text)
+
+            ctk.CTkLabel(quick_bar, text="＋ Γρήγορη προσθήκη:", font=("Arial", 11, "bold"), text_color="#64748b").pack(side="left", padx=2)
+            ctk.CTkButton(quick_bar, text="＋ Ρολό Ηλεκτρικό", font=("Arial", 11), height=24, fg_color="#0284c7",
+                          command=lambda: add_spec("ΡΟΛΟ ΑΛΟΥΜΙΝΙΟΥ ΒΑΡΕΩΣ ΤΥΠΟΥ ΗΛΕΚΤΡΙΚΟ ΜΕ ΘΕΡΜΟΔΙΑΚΟΠΗ")).pack(side="left", padx=2)
+            ctk.CTkButton(quick_bar, text="＋ Σίτα", font=("Arial", 11), height=24, fg_color="#0284c7",
+                          command=lambda: add_spec("ΣΙΤΑ ΣΥΡΟΜΕΝΗ ΜΟΝΟΦΥΛΛΗ")).pack(side="left", padx=2)
+            ctk.CTkButton(quick_bar, text="＋ Triplex", font=("Arial", 11), height=24, fg_color="#0284c7",
+                          command=lambda: add_spec("ΥΑΛΟΠΙΝΑΚΕΣ 4 ΕΠΟΧΩΝ 4mm Planistar Evo-Argon-3+3 TRIPLEX")).pack(side="left", padx=2)
+
+            def save_ed():
+                row["series"] = e_ser.get().strip()
+                row["color"] = e_col.get().strip()
+                loc_val = e_lc.get().strip()
+                row["e_loc"].delete(0, "end"); row["e_loc"].insert(0, loc_val)
+                row["descr"] = txt_box.get("1.0", "end").strip()
+                win_ed.destroy()
+
+            ctk.CTkButton(pnl, text="💾 ΑΠΟΘΗΚΕΥΣΗ ΠΡΟΔΙΑΓΡΑΦΩΝ", font=("Arial", 13, "bold"),
+                          fg_color=BLUEH, hover_color="#1e40af", height=38,
+                          command=save_ed).pack(fill="x", pady=6)
 
         def del_row(row):
             rows.remove(row); row["frame"].destroy(); refresh()
 
+        def dup_row(src):
+            nr = add_row()
+            nr["code"] = src.get("code", "")
+            nr["name"] = src.get("name", "")
+            nr["category"] = src.get("category", "")
+            nr["series"] = src.get("series", "")
+            nr["color"] = src.get("color", "")
+            nr["descr"] = src.get("descr", "")
+            nr["image"] = src.get("image", "")
+            nr["materials"] = list(src.get("materials", []))
+            nr["e_w"].delete(0, "end"); nr["e_w"].insert(0, src["e_w"].get())
+            nr["e_h"].delete(0, "end"); nr["e_h"].insert(0, src["e_h"].get())
+            nr["e_loc"].delete(0, "end"); nr["e_loc"].insert(0, src["e_loc"].get())
+            nr["e_q"].delete(0, "end"); nr["e_q"].insert(0, src["e_q"].get())
+            nr["e_p"].delete(0, "end"); nr["e_p"].insert(0, src["e_p"].get())
+            if src["b_des"].cget("text") != "📐 Διάλεξε Σχέδιο...":
+                nr["b_des"].configure(text=src["b_des"].cget("text"), fg_color=GREEN, hover_color="#15803d")
+            refresh()
+            nr["e_w"].focus_set()
+
         def add_row():
             r = ctk.CTkFrame(rowsbox, fg_color=ROWB, corner_radius=8)
             r.pack(fill="x", pady=3)
-            e_desc = ctk.CTkEntry(r, width=290, placeholder_text="π.χ. Συρόμενο σαλονιού", font=("Arial", 13))
-            e_desc.pack(side="left", padx=3, pady=6)
-            b_des = ctk.CTkButton(r, text="📐", width=42, fg_color=ACCENT, font=("Arial", 14, "bold"))
-            b_des.pack(side="left", padx=3)
-            e_w = ctk.CTkEntry(r, width=62, placeholder_text="Π", font=("Arial", 13)); e_w.pack(side="left", padx=3)
-            e_h = ctk.CTkEntry(r, width=62, placeholder_text="Υ", font=("Arial", 13)); e_h.pack(side="left", padx=3)
-            e_q = ctk.CTkEntry(r, width=56, font=("Arial", 13)); e_q.insert(0, "1"); e_q.pack(side="left", padx=3)
-            e_p = ctk.CTkEntry(r, width=86, placeholder_text="0", font=("Arial", 13)); e_p.pack(side="left", padx=3)
-            l_sum = ctk.CTkLabel(r, text=fmt(0), font=("Arial", 12, "bold"), width=96, text_color=BLUEH)
+            
+            b_des = ctk.CTkButton(r, text="📐 Διάλεξε Σχέδιο...", width=280, fg_color=ACCENT,
+                                  font=("Arial", 12, "bold"), anchor="w")
+            b_des.pack(side="left", padx=3, pady=6)
+            
+            e_w = ctk.CTkEntry(r, width=58, placeholder_text="Π", font=("Arial", 13)); e_w.pack(side="left", padx=3)
+            e_h = ctk.CTkEntry(r, width=58, placeholder_text="Υ", font=("Arial", 13)); e_h.pack(side="left", padx=3)
+            e_loc = ctk.CTkEntry(r, width=125, placeholder_text="Τοποθέτηση", font=("Arial", 12)); e_loc.pack(side="left", padx=3)
+            e_q = ctk.CTkEntry(r, width=44, font=("Arial", 13)); e_q.insert(0, "1"); e_q.pack(side="left", padx=3)
+            e_p = ctk.CTkEntry(r, width=82, placeholder_text="0", font=("Arial", 13)); e_p.pack(side="left", padx=3)
+            
+            l_sum = ctk.CTkLabel(r, text=fmt(0), font=("Arial", 12, "bold"), width=92, text_color=BLUEH)
             l_sum.pack(side="left", padx=3)
-            row = {"frame": r, "e_desc": e_desc, "b_des": b_des, "e_w": e_w, "e_h": e_h,
-                   "e_q": e_q, "e_p": e_p, "l_sum": l_sum, "code": "", "image": "", "category": "",
-                   "materials": []}
+            
+            row = {"frame": r, "b_des": b_des, "e_w": e_w, "e_h": e_h, "e_loc": e_loc,
+                   "e_q": e_q, "e_p": e_p, "l_sum": l_sum, "code": "", "name": "", "series": "",
+                   "color": "", "descr": "", "image": "", "category": "", "materials": []}
+            
             b_des.configure(command=lambda: pick_design(row))
-            for e in (e_desc, e_w, e_h, e_q, e_p):
+            for e in (e_w, e_h, e_loc, e_q, e_p):
                 e.bind("<KeyRelease>", lambda e: refresh())
-            ctk.CTkButton(r, text="✕", width=30, fg_color=RED,
-                          command=lambda: del_row(row)).pack(side="left", padx=3)
+                
+            b_edit = ctk.CTkButton(r, text="⚙️", width=30, fg_color="#475569", hover_color="#334155",
+                                   command=lambda: edit_details(row))
+            b_edit.pack(side="left", padx=2)
+            
+            b_dup = ctk.CTkButton(r, text="📋", width=30, fg_color="#0284c7", hover_color="#0369a1",
+                                  command=lambda: dup_row(row))
+            b_dup.pack(side="left", padx=2)
+            
+            b_del = ctk.CTkButton(r, text="✕", width=28, fg_color=RED, hover_color="#b91c1c",
+                                  command=lambda: del_row(row))
+            b_del.pack(side="left", padx=2)
+            
             rows.append(row); refresh()
-            e_desc.focus_set()
+            return row
 
         brow = ctk.CTkFrame(mid, fg_color=CARD); brow.pack(fill="x", padx=14, pady=(0, 8))
         ctk.CTkButton(brow, text="＋ Προσθήκη γραμμής", font=("Arial", 13, "bold"),
                       fg_color=ACCENT, command=add_row).pack(side="left")
-        ctk.CTkLabel(brow, text="Το 📐 φέρνει σχέδιο από τον κατάλογο (προαιρετικό)",
+        ctk.CTkLabel(brow, text="💡 Πάτα «📐 Διάλεξε Σχέδιο» για άμεση επιλογή, ή «📋» για γρήγορη αντιγραφή",
                      font=("Arial", 11), text_color=TXTG).pack(side="left", padx=10)
         add_row()
         refresh()
@@ -812,34 +1588,54 @@ class App(ctk.CTk):
 
         def save():
             cname = cb_cust.get().strip()
-            if not cname:
+            # "CTkComboBox" = default κείμενο του widget όταν ο κατάλογος είναι άδειος
+            if not cname or cname == "CTkComboBox":
                 return messagebox.showwarning("Προσοχή", "Γράψε όνομα πελάτη")
             lines = []
             for row in rows:
-                desc = row["e_desc"].get().strip()
-                if not desc and not row.get("image"):
+                name = row.get("name") or row["b_des"].cget("text")
+                w = row["e_w"].get().strip(); h = row["e_h"].get().strip()
+                p_str = row["e_p"].get().strip()
+                if name == "📐 Διάλεξε Σχέδιο..." and not w and not h and not p_str:
                     continue
                 try:
                     q = float((row["e_q"].get() or "1").replace(",", "."))
                 except Exception:
                     q = 1
                 try:
-                    p = float((row["e_p"].get() or "0").replace(",", "."))
+                    p = float((p_str or "0").replace(",", "."))
                 except Exception:
                     p = 0
                 if q < 0 or p < 0:
                     return messagebox.showwarning("Προσοχή", "Ποσότητα και τιμή δεν μπορεί να είναι αρνητικές.")
                 if q > 100000 or p > 10000000:
                     return messagebox.showwarning("Προσοχή", "Ποσότητα/τιμή εκτός ορίων.")
-                w = row["e_w"].get().strip(); h = row["e_h"].get().strip()
-                base = desc or f"{row.get('code', '')}"
-                name = base + (f" ({w or '-' }x{h or '-' } εκ.)" if (w or h) else "")
-                lines.append({"name": name, "base": base, "unit": "τεμ.", "qty": q, "price": p,
-                              "code": row.get("code", ""), "category": row.get("category", ""),
-                              "width": w, "height": h, "image": row.get("image", ""),
-                              "materials": row.get("materials", [])})
+                
+                loc = row["e_loc"].get().strip()
+                base_name = row.get("name") or (f"{row.get('code', '')} Κούφωμα".strip() or "Κούφωμα")
+                dim_suffix = f" ({w or '-' }x{h or '-' } εκ.)" if (w or h) else ""
+                loc_suffix = f" - {loc}" if loc else ""
+                full_name = f"{base_name}{dim_suffix}{loc_suffix}"
+                
+                lines.append({
+                    "name": full_name,
+                    "base": base_name,
+                    "unit": "τεμ.",
+                    "qty": q,
+                    "price": p,
+                    "code": row.get("code", ""),
+                    "category": row.get("category", "") or guess_category(base_name),
+                    "series": row.get("series", ""),
+                    "color": row.get("color", ""),
+                    "location": loc,
+                    "width": w,
+                    "height": h,
+                    "descr": row.get("descr", "") or base_name,
+                    "image": row.get("image", ""),
+                    "materials": row.get("materials", [])
+                })
             if not lines:
-                return messagebox.showwarning("Προσοχή", "Γράψε τουλάχιστον 1 γραμμή")
+                return messagebox.showwarning("Προσοχή", "Γράψε τουλάχιστον 1 γραμμή κουφώματος")
             sub, vr, vat, tot = refresh()
             phone = e_phone.get().strip()
             c = db()
@@ -854,10 +1650,21 @@ class App(ctk.CTk):
                                 (cname, phone, "", ""))
                 cid = cur.lastrowid; cinfo = phone
             items = [{"name": L["name"], "unit": L["unit"], "qty": L["qty"], "price": L["price"]} for L in lines]
-            qdesigns = [{"code": L["code"], "name": L["base"], "category": L["category"],
-                         "width": L["width"], "height": L["height"], "descr": "",
-                         "image": L["image"], "qty": L["qty"],
-                         "materials": L.get("materials", [])} for L in lines if L.get("image")]
+            qdesigns = [{
+                "code": L["code"],
+                "name": L["base"],
+                "category": L["category"],
+                "series": L["series"],
+                "color": L["color"],
+                "location": L["location"],
+                "width": L["width"],
+                "height": L["height"],
+                "descr": L["descr"],
+                "image": L["image"],
+                "qty": L["qty"],
+                "price": L["price"],
+                "materials": L.get("materials", [])
+            } for L in lines if L.get("image") or (L.get("width") and L.get("height"))]
             qobj = {"number": safe_quote_number(e_num.get().strip() or nxt), "date": datetime.now().strftime("%d/%m/%Y"),
                     "customer_id": cid, "customer_name": cname, "customer_info": cinfo,
                     "items_json": json.dumps(items, ensure_ascii=False),
@@ -908,6 +1715,15 @@ class App(ctk.CTk):
                       command=lambda: self.design_dialog()).pack(side="left", padx=4)
         ctk.CTkButton(bar, text="📥 Εισαγωγή φακέλου", fg_color=ACCENT,
                       command=lambda: self.bulk_import()).pack(side="left", padx=4)
+        
+        def reload_presets():
+            if messagebox.askyesno("Φόρτωση Προτύπων", "Να προστεθούν τα 10 βασικά πρότυπα κουφωμάτων Alumil & Europa;"):
+                c = db()
+                seed_default_designs(c)
+                c.commit(); c.close()
+                load()
+        ctk.CTkButton(bar, text="⭐ Πρότυπα Alumil", fg_color="#0284c7",
+                      command=reload_presets).pack(side="left", padx=4)
         grid = ctk.CTkScrollableFrame(box, fg_color=CARD, height=430)
         grid.pack(fill="both", expand=True, padx=8, pady=8)
 
@@ -1018,7 +1834,8 @@ class App(ctk.CTk):
             data = dict(c.execute("SELECT * FROM designs WHERE id=?", (did,)).fetchone())
             c.close()
         win = ctk.CTkToplevel(self)
-        win.title("Σχέδιο"); win.geometry("460x620"); win.grab_set()
+        win.title("Σχέδιο"); win.geometry("460x620")
+        win.after(100, lambda: win.grab_set() if win.winfo_exists() else None)
         img_file = {"v": data.get("image", "")}
         prev = {"lbl": None}
 
@@ -1057,6 +1874,9 @@ class App(ctk.CTk):
             ents[key] = e
         row("Κωδικός σχεδίου * (π.χ. Π-101)", "code", data.get("code", ""))
         row("Όνομα * (π.χ. Συρόμενο δίφυλλο)", "name", data.get("name", ""))
+        row("Σειρά (π.χ. ALUMIL/S350 ALUTHERM, M9660)", "series", data.get("series", ""))
+        row("Χρώμα (π.χ. ΑΝΘΡΑΚΙ RAL 8.85 ΘΕΡΜΟ)", "color", data.get("color", ""))
+        row("Τοποθέτηση (π.χ. 1ος-ΓΩΝΙΑΚΟ, ΙΣΟΓΕΙΟ)", "location", data.get("location", ""))
         ctk.CTkLabel(frm, text="Κατηγορία", font=("Arial", 12, "bold")).pack(anchor="w")
         cb = ctk.CTkComboBox(frm, values=CATEGORIES, width=380, font=("Arial", 13))
         cb.set(data.get("category", "Άλλο") or "Άλλο"); cb.pack(pady=(0, 8))
@@ -1120,13 +1940,14 @@ class App(ctk.CTk):
                     mp = 0
                 mats.append({"name": nm, "qty": mq, "unit": mrow["u"].get(), "price": mp})
             vals = (code, name, cb.get(), ents["width"].get().strip(), ents["height"].get().strip(),
-                    ents["descr"].get().strip(), img_file["v"], pr, json.dumps(mats, ensure_ascii=False))
+                    ents["descr"].get().strip(), img_file["v"], pr, json.dumps(mats, ensure_ascii=False),
+                    ents["series"].get().strip(), ents["color"].get().strip(), ents["location"].get().strip())
             c = db()
             if did:
-                c.execute("UPDATE designs SET code=?,name=?,category=?,width=?,height=?,descr=?,image=?,price=?,materials_json=? WHERE id=?",
+                c.execute("UPDATE designs SET code=?,name=?,category=?,width=?,height=?,descr=?,image=?,price=?,materials_json=?,series=?,color=?,location=? WHERE id=?",
                           (*vals, did))
             else:
-                c.execute("INSERT INTO designs(code,name,category,width,height,descr,image,price,materials_json) VALUES(?,?,?,?,?,?,?,?,?)", vals)
+                c.execute("INSERT INTO designs(code,name,category,width,height,descr,image,price,materials_json,series,color,location) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", vals)
             c.commit(); c.close()
             win.destroy(); self.show("catalog")
         ctk.CTkButton(frm, text="💾 Αποθήκευση", font=("Arial", 14, "bold"),
