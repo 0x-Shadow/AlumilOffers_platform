@@ -3,7 +3,7 @@
 AluminaOffers v1.2.7 - Προσφορές Αλουμινάδων για Windows
 Dashboard | Νέα Προσφορά (μία οθόνη) | Κατάλογος | Στοιχεία+Λογότυπο | PDF με ΦΠΑ
 """
-__version__ = "1.2.7"
+__version__ = "1.2.9"
 import os, sqlite3, json, shutil, re, html, sys, subprocess, unicodedata, urllib.parse
 from datetime import datetime
 from tkinter import messagebox, filedialog
@@ -34,8 +34,10 @@ def safe_img_name(name):
     b = os.path.basename(str(name))
     if b in ("", ".", "..") or b.startswith("."):
         return None
+    if ".." in b:
+        return None
     # allow only sane chars + known extensions
-    if not re.fullmatch(r"[A-Za-z0-9\u0370-\u03FF_\-]+\.(jpg|jpeg|png|bmp|webp)", b, re.IGNORECASE):
+    if not re.fullmatch(r"[A-Za-z0-9\u0370-\u03FF_\- .()]+\.(jpg|jpeg|png|bmp|webp)", b, re.IGNORECASE):
         # timestamped names from store_image always match; anything else -> reject
         return None
     return b
@@ -498,6 +500,15 @@ def dims_meters_txt(w, h):
     h_str = f"{hn:g}"
     return f"{w_str} × {h_str} εκ."
 
+def dims_cm_values(w, h):
+    """Numeric (width, height) in cm, accepting cm or metre input."""
+    wn, hn = _num(w), _num(h)
+    if wn is None or hn is None or wn <= 0 or hn <= 0:
+        return None, None
+    if max(wn, hn) < 10:
+        wn, hn = wn * 100.0, hn * 100.0
+    return wn, hn
+
 # Σειρά έχει σημασία: το "μπαλκονόπορτα" περιέχει το "πόρτα".
 _CAT_HINTS = [("συρομεν", "Συρόμενο"), ("επαλληλ", "Συρόμενο"), ("μπαλκον", "Μπαλκονόπορτα"),
               ("βιτριν", "Βιτρίνα"), ("ντουλαπ", "Ντουλάπα"),
@@ -530,7 +541,7 @@ class Schematic(Flowable):
     BOX_H = 62*mm
 
     def __init__(self, w_cm, h_cm, category="", label=None, w_txt=None, h_txt=None,
-                 name="", descr="", location=""):
+                 name="", descr="", location="", show_labels=True):
         Flowable.__init__(self)
         self.w_cm = float(w_cm)
         self.h_cm = float(h_cm)
@@ -542,9 +553,15 @@ class Schematic(Flowable):
         self.h_txt = str(h_txt) if h_txt is not None else f"{self.h_cm:g}"
         self.label = label or f"{self.w_txt} x {self.h_txt} εκ."
         self.feat = self._features()
-        self.pad_l = 8*mm
-        self.pad_t = 6.5*mm
-        self.pad_b = 7.5*mm
+        self.show_labels = show_labels
+        if show_labels:
+            self.pad_l = 8*mm
+            self.pad_t = 6.5*mm
+            self.pad_b = 7.5*mm
+        else:
+            self.pad_l = 2*mm
+            self.pad_t = 2*mm
+            self.pad_b = 2*mm
         shutter_h = 7.2*mm if self.feat["shutter"] else 0
         aw = self.BOX_W - self.pad_l - 3*mm
         ah = self.BOX_H - self.pad_t - self.pad_b - shutter_h
@@ -780,6 +797,9 @@ class Schematic(Flowable):
         c.setLineWidth(0.85)
         c.rect(x0, y0, iw, ih, stroke=1, fill=0)
 
+        if not self.show_labels:
+            return
+
         # dimensions (small, outside)
         c.setStrokeColor(DIMC)
         c.setLineWidth(0.45)
@@ -811,7 +831,118 @@ class Schematic(Flowable):
         c.setFillColor(CAPTIONC)
         c.drawCentredString(self.BOX_W / 2.0, 1.6*mm, cap[:42])
 
-def schematic_for(d):
+class ScaledFlowable(Flowable):
+    """Draw another flowable scaled down to fit a maximum box (PDF thumbnails)."""
+
+    def __init__(self, flowable, max_w, max_h):
+        Flowable.__init__(self)
+        self.flowable = flowable
+        self.max_w = max_w
+        self.max_h = max_h
+        self.scale = 1.0
+        self.width = 0
+        self.height = 0
+
+    def wrap(self, aW=None, aH=None):
+        w, h = self.flowable.wrap(aW, aH)
+        if w > 0 and h > 0:
+            self.scale = min(self.max_w / w, self.max_h / h)
+        self.width = w * self.scale
+        self.height = h * self.scale
+        return self.width, self.height
+
+    def draw(self):
+        c = self.canv
+        c.saveState()
+        c.scale(self.scale, self.scale)
+        self.flowable.drawOn(c, 0, 0)
+        c.restoreState()
+
+class DimensionedBox(Flowable):
+    """Image/schematic with architectural width/height dimension arrows and cm labels."""
+
+    def __init__(self, content, w_cm, h_cm, box_w, box_h, label_font=5.8):
+        Flowable.__init__(self)
+        self.content = content
+        self.w_cm = w_cm
+        self.h_cm = h_cm
+        self.width = box_w
+        self.height = box_h
+        self.label_font = label_font
+
+    def wrap(self, aW=None, aH=None):
+        return self.width, self.height
+
+    @staticmethod
+    def _arrow_h(c, x, y, direction):
+        s = 1.15*mm
+        p = c.beginPath()
+        p.moveTo(x, y)
+        p.lineTo(x - direction * s, y + s * 0.55)
+        p.lineTo(x - direction * s, y - s * 0.55)
+        p.close()
+        c.drawPath(p, fill=1, stroke=0)
+
+    @staticmethod
+    def _arrow_v(c, x, y, direction):
+        s = 1.15*mm
+        p = c.beginPath()
+        p.moveTo(x, y)
+        p.lineTo(x - s * 0.55, y - direction * s)
+        p.lineTo(x + s * 0.55, y - direction * s)
+        p.close()
+        c.drawPath(p, fill=1, stroke=0)
+
+    def draw(self):
+        c = self.canv
+        ml = 7.5*mm
+        mt = 5.5*mm
+        mr = 1.0*mm
+        mb = 1.0*mm
+        cw = max(1.0, self.width - ml - mr)
+        ch = max(1.0, self.height - mt - mb)
+        cx, cy = ml, mb
+
+        if self.content is not None:
+            cw_c, ch_c = self.content.wrap(cw, ch)
+            ox = cx + (cw - cw_c) / 2.0
+            oy = cy + (ch - ch_c) / 2.0
+            c.saveState()
+            self.content.drawOn(c, ox, oy)
+            c.restoreState()
+            left, bottom, right, top = ox, oy, ox + cw_c, oy + ch_c
+        else:
+            left, bottom, right, top = cx, cy, cx + cw, cy + ch
+
+        dimc = colors.HexColor("#475569")
+        c.setStrokeColor(dimc)
+        c.setFillColor(dimc)
+        c.setLineWidth(0.45)
+
+        # Width dimension above the frame.
+        hy = top + 2.0*mm
+        c.line(left, hy, right, hy)
+        c.line(left, top, left, hy + 0.8*mm)
+        c.line(right, top, right, hy + 0.8*mm)
+        self._arrow_h(c, left, hy, -1)
+        self._arrow_h(c, right, hy, 1)
+        c.setFont(FONT, self.label_font)
+        c.drawCentredString((left + right) / 2.0, hy + 1.0*mm, f"{self.w_cm:g} εκ.")
+
+        # Height dimension left of the frame.
+        vx = left - 2.2*mm
+        c.line(vx, bottom, vx, top)
+        c.line(left, bottom, vx - 0.8*mm, bottom)
+        c.line(left, top, vx - 0.8*mm, top)
+        self._arrow_v(c, vx, bottom, -1)
+        self._arrow_v(c, vx, top, 1)
+        c.saveState()
+        c.translate(vx - 1.5*mm, (bottom + top) / 2.0)
+        c.rotate(90)
+        c.drawCentredString(0, 0, f"{self.h_cm:g} εκ.")
+        c.restoreState()
+
+def schematic_for(d, show_labels=True):
     """Schematic αν η γραμμή έχει αριθμητικές διαστάσεις, αλλιώς None."""
     w = _num(d.get("width"))
     h = _num(d.get("height"))
@@ -827,6 +958,7 @@ def schematic_for(d):
             name=d.get("name", "") or "",
             descr=d.get("descr", "") or "",
             location=d.get("location", "") or "",
+            show_labels=show_labels,
         )
     except Exception:
         return None
@@ -854,7 +986,7 @@ def make_pdf(q, filepath):
     designs = json.loads(dj) if isinstance(dj, str) else (dj or [])
     doc = SimpleDocTemplate(filepath, pagesize=A4,
         leftMargin=18*mm, rightMargin=18*mm, topMargin=14*mm, bottomMargin=16*mm,
-        title=f"Prosfora {q['number']}")
+        title="Προσφορά")
     st_title = ParagraphStyle('t', fontName=FONTB, fontSize=20, textColor=BLUE, leading=24)
     st_h = ParagraphStyle('h', fontName=FONTB, fontSize=11, textColor=BLUE, leading=14)
     st_n = ParagraphStyle('n', fontName=FONT, fontSize=9.5, textColor=DARK, leading=13)
@@ -871,6 +1003,9 @@ def make_pdf(q, filepath):
     st_td2 = ParagraphStyle('td2', fontName=FONT, fontSize=8, leading=11, textColor=DARK)
     st_spec = ParagraphStyle('spec', fontName=FONT, fontSize=7.5, leading=10, textColor=colors.HexColor("#1e293b"))
     st_price = ParagraphStyle('pr', fontName=FONTB, fontSize=14, leading=18, alignment=2, textColor=PRICEGR)
+    st_cell_c = ParagraphStyle('cc', parent=st_cell, alignment=1)
+    st_cell_r = ParagraphStyle('cr', parent=st_cell, alignment=2)
+    st_cellb_r = ParagraphStyle('cbr', parent=st_cellb, alignment=2, textColor=PRICEGR)
 
     story = []
     logo = get_logo()
@@ -899,7 +1034,6 @@ def make_pdf(q, filepath):
                  f"<font size=11 color='#0f172a'><b>{esc(q['customer_name'])}</b></font><br/>"
                  f"<font size=9 color='#334155'>{esc(q.get('customer_info',''))}</font>")
     meta_right = (f"<font size=9 color='#0f172a'>"
-                  f"<b>ΠΡΟΣΦΟΡΑ No:</b> {esc(q['number'])}<br/>"
                   f"<b>ΗΜΕΡΟΜΗΝΙΑ:</b> {esc(q['date'])}<br/>"
                   f"<b>ΕΙΔΟΣ:</b> <font color='#1a56db'><b>{offer_type_txt}</b></font>"
                   f"</font>")
@@ -931,16 +1065,62 @@ def make_pdf(q, filepath):
     else:
         loose_items = items
 
+    labor_row_needed = include_labor and labor_amt > 0
+    labor_desc_lines = [esc(l.strip()) for l in labor_desc.splitlines() if l.strip()]
+    labor_desc_html = "<br/>".join(labor_desc_lines) or esc(labor_desc)
+
+    design_img_cache = {}
+
+    def design_image_name(d):
+        """Image from the quote, or from the catalog by code/name if the quote has none."""
+        img = str(d.get("image") or "").strip()
+        if img and img_path(img):
+            return img
+        code = str(d.get("code") or "").strip()
+        name = str(d.get("name") or "").strip()
+        key = (code.lower(), name.lower())
+        if key in design_img_cache:
+            return design_img_cache[key]
+        found = ""
+        try:
+            c = db()
+            row = None
+            if code:
+                row = c.execute("SELECT image FROM designs WHERE code=? LIMIT 1", (code,)).fetchone()
+            if not row and name:
+                row = c.execute("SELECT image FROM designs WHERE LOWER(name)=LOWER(?) LIMIT 1", (name,)).fetchone()
+            c.close()
+            found = (row["image"] if row else "") or ""
+        except Exception:
+            found = ""
+        design_img_cache[key] = found
+        return found
+
+    def labor_table_row():
+        return [
+            Paragraph("<font size=7 color='#475569'><b>ΕΡΓΑΣΙΑ</b></font>", st_cell_c),
+            Paragraph(f"<b>ΕΡΓΑΣΙΑ &amp; ΤΟΠΟΘΕΤΗΣΗ</b><br/>"
+                      f"<font size=7.5 color='#475569'>{labor_desc_html}</font>", st_n),
+            Paragraph("1", st_cell_c),
+            Paragraph("έργο", st_cell_c),
+            Paragraph(fmt(labor_amt), st_cell_r),
+            Paragraph(f"<b>{fmt(labor_amt)}</b>", st_cellb_r),
+        ]
+
     if designs:
         prod_rows = [
-            [Paragraph("<b>ΚΟΥΦΩΜΑΤΑ &amp; ΚΑΤΑΣΚΕΥΕΣ</b>", st_cellh), "", ""]
+            [Paragraph("<b>ΚΟΥΦΩΜΑΤΑ &amp; ΚΑΤΑΣΚΕΥΕΣ</b>", st_cellh), "", "", "", "", ""],
+            [Paragraph("<b>Εικόνα</b>", st_cellh), Paragraph("<b>Υλικό / Εργασία</b>", st_cellh),
+             Paragraph("<b>Ποσ.</b>", st_cellh), Paragraph("<b>Μον.</b>", st_cellh),
+             Paragraph("<b>Τιμή μον.</b>", st_cellh), Paragraph("<b>Σύνολο</b>", st_cellh)],
         ]
         tstyle = [
-            ('SPAN', (0, 0), (2, 0)),
-            ('BACKGROUND', (0, 0), (2, 0), HEADBAR),
-            ('TOPPADDING', (0, 0), (2, 0), 5),
-            ('BOTTOMPADDING', (0, 0), (2, 0), 5),
-            ('LEFTPADDING', (0, 0), (2, 0), 8),
+            ('SPAN', (0, 0), (5, 0)),
+            ('BACKGROUND', (0, 0), (5, 0), HEADBAR),
+            ('BACKGROUND', (0, 1), (5, 1), BLUE),
+            ('TOPPADDING', (0, 0), (5, 0), 5),
+            ('BOTTOMPADDING', (0, 0), (5, 0), 5),
+            ('LEFTPADDING', (0, 0), (5, 0), 8),
             ('BOX', (0, 0), (-1, -1), 0.6, colors.HexColor("#cbd5e1")),
             ('ROUNDEDCORNERS', [6, 6, 6, 6]),
             ('VALIGN', (0, 1), (-1, -1), 'MIDDLE'),
@@ -951,18 +1131,30 @@ def make_pdf(q, filepath):
             ('RIGHTPADDING', (0, 1), (-1, -1), 8),
         ]
         for idx, d in enumerate(designs, start=1):
-            pth = img_path(d.get("image", ""))
-            im = pdf_image(pth, max_w=26*mm, max_h=24*mm) if pth else None
-            art = im or Paragraph("<font size=14 color='#94a3b8'>📐</font>", ParagraphStyle('art_c', fontName=FONT, alignment=1))
+            pth = img_path(design_image_name(d))
+            w_cm, h_cm = dims_cm_values(d.get("width"), d.get("height"))
+            im = pdf_image(pth, max_w=20*mm, max_h=17*mm) if pth else None
+            if im:
+                content = im
+            else:
+                sch = schematic_for(d, show_labels=False)
+                content = ScaledFlowable(sch, 20*mm, 17*mm) if sch else None
+            if content is not None and w_cm and h_cm:
+                art = DimensionedBox(content, w_cm, h_cm, 29*mm, 25*mm)
+            elif content is not None:
+                art = content
+            else:
+                art = Paragraph(
+                    "<font size=10 color='#cbd5e1'>▢</font>",
+                    ParagraphStyle('art_c', fontName=FONT, alignment=1))
             try:
                 dq = float(d.get("qty", 1) or 1)
             except Exception:
                 dq = 1
             code = str(d.get("code") or "").strip()
             raw_name = str(d.get("name") or "").strip() or "Κούφωμα"
-            title = f"{idx}. {raw_name.upper()}"
-            if code:
-                title += f" ({code})"
+            title_txt = f"{idx}. {raw_name.upper()}"
+            code_html = f" <font size=8 color='#64748b'>({esc(code)})</font>" if code else ""
             location_str = str(d.get("location") or "").strip()
             series = str(d.get("series") or d.get("category") or "—").strip() or "—"
             color = str(d.get("color") or "—").strip() or "—"
@@ -972,9 +1164,10 @@ def make_pdf(q, filepath):
             desc_inline = " • ".join(clean_lines[:2])
 
             mid_parts = [
-                f"<font size=9.5 color='#0f172a'><b>{esc(title)}</b></font>" +
-                (f" &nbsp;<font size=8.5 color='#1d4ed8'><b>• Τοποθέτηση: {esc(location_str)}</b></font>" if location_str else ""),
-                f"<font size=8 color='#475569'>Σειρά: <b>{esc(series)}</b> &nbsp;|&nbsp; Χρώμα: <b>{esc(color)}</b> &nbsp;|&nbsp; Διαστάσεις: <b>{esc(dim_txt)}</b></font>"
+                f"<font size=9.5 color='#0f172a'><b>{esc(title_txt)}</b>{code_html}</font>" +
+                (f"<br/><font size=8.5 color='#1d4ed8'><b>• Τοποθέτηση: {esc(location_str)}</b></font>" if location_str else ""),
+                f"<font size=8 color='#475569'>Σειρά: <b>{esc(series)}</b></font>",
+                f"<font size=8 color='#475569'>Χρώμα: <b>{esc(color)}</b> &nbsp;|&nbsp; Διαστάσεις: <b>{esc(dim_txt)}</b></font>"
             ]
             if desc_inline:
                 mid_parts.append(f"<font size=7.5 color='#64748b'>{desc_inline}</font>")
@@ -986,20 +1179,29 @@ def make_pdf(q, filepath):
                 unit_price = 0
             
             tot_price = unit_price * dq
-            if unit_price > 0:
-                price_html = (f"<font size=8 color='#64748b'>{dq:g} τεμ. × {fmt(unit_price)}</font><br/>"
-                              f"<font size=11 color='#15803d'><b>{fmt(tot_price)}</b></font>")
-            else:
-                price_html = f"<font size=9 color='#64748b'><b>{dq:g} τεμ.</b></font>"
+            unit_txt = str(d.get("unit") or "τεμ.").strip() or "τεμ."
 
-            prod_rows.append([art, Paragraph(mid_html, st_n), Paragraph(price_html, ParagraphStyle('r_pr', fontName=FONT, alignment=2, leading=13))])
+            prod_rows.append([
+                art,
+                Paragraph(mid_html, st_n),
+                Paragraph(f"{dq:g}", st_cell_c),
+                Paragraph(esc(unit_txt), st_cell_c),
+                Paragraph(fmt(unit_price), st_cell_r),
+                Paragraph(f"<b>{fmt(tot_price)}</b>", st_cellb_r),
+            ])
             r_idx = len(prod_rows) - 1
             bg_col = colors.white if r_idx % 2 == 1 else LIGHT_BG
             tstyle.append(('BACKGROUND', (0, r_idx), (-1, r_idx), bg_col))
             if r_idx > 1:
                 tstyle.append(('LINEABOVE', (0, r_idx), (-1, r_idx), 0.4, colors.HexColor("#e2e8f0")))
 
-        prod_table = Table(prod_rows, colWidths=[28*mm, 106*mm, 40*mm], repeatRows=1)
+        if labor_row_needed:
+            prod_rows.append(labor_table_row())
+            r_idx = len(prod_rows) - 1
+            tstyle.append(('BACKGROUND', (0, r_idx), (-1, r_idx), colors.HexColor("#f0fdf4")))
+            tstyle.append(('LINEABOVE', (0, r_idx), (-1, r_idx), 0.4, colors.HexColor("#e2e8f0")))
+
+        prod_table = Table(prod_rows, colWidths=[34*mm, 64*mm, 14*mm, 14*mm, 24*mm, 24*mm], repeatRows=2)
         prod_table.setStyle(TableStyle(tstyle))
         story.append(prod_table)
         story.append(Spacer(1, 8))
@@ -1008,7 +1210,7 @@ def make_pdf(q, filepath):
         sec_title = "ΣΥΜΠΛΗΡΩΜΑΤΙΚΑ ΥΛΙΚΑ / ΠΑΡΕΛΚΟΜΕΝΑ" if designs else "ΑΝΑΛΥΤΙΚΗ ΠΡΟΣΦΟΡΑ ΥΛΙΚΩΝ"
         story.append(Paragraph(sec_title, st_h))
         story.append(Spacer(1, 4))
-        data = [[Paragraph("<b>Εικόνα</b>", st_cellh), Paragraph("<b>Περιγραφή Υλικού</b>", st_cellh), Paragraph("<b>Ποσ.</b>", st_cellh),
+        data = [[Paragraph("<b>Εικόνα</b>", st_cellh), Paragraph("<b>Υλικό / Εργασία</b>", st_cellh), Paragraph("<b>Ποσ.</b>", st_cellh),
                  Paragraph("<b>Μον.</b>", st_cellh), Paragraph("<b>Τιμή μον.</b>", st_cellh),
                  Paragraph("<b>Σύνολο</b>", st_cellh)]]
         for it in loose_items:
@@ -1069,6 +1271,8 @@ def make_pdf(q, filepath):
                 Paragraph(fmt(pr), st_cell),
                 Paragraph(fmt(qty*pr), st_cell),
             ])
+        if labor_row_needed and not designs:
+            data.append(labor_table_row())
         t = Table(data, colWidths=[22*mm, 68*mm, 14*mm, 14*mm, 28*mm, 28*mm], repeatRows=1)
         t.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), BLUE),
@@ -1346,19 +1550,28 @@ class App(ctk.CTk):
             c = db(); c.execute("DELETE FROM quotes WHERE id=?", (i,)); c.commit(); c.close()
             self.show("home")
 
-    def open_pdf(self, q):
+    def _ensure_pdf(self, q):
+        """Regenerate the PDF so it always has the current layout, atomically."""
         num = safe_quote_number(q['number'])
         path = os.path.join(PDF_DIR, f"Prosfora_{num}.pdf")
-        if not os.path.exists(path):
-            make_pdf(q, path)
-        open_path_safe(path)
+        tmp = path + ".tmp"
+        try:
+            make_pdf(q, tmp)
+            os.replace(tmp, path)
+        except Exception:
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
+            if not os.path.exists(path):
+                raise
+        return path
+
+    def open_pdf(self, q):
+        open_path_safe(self._ensure_pdf(q))
 
     def open_quote_folder(self, q):
-        num = safe_quote_number(q['number'])
-        path = os.path.join(PDF_DIR, f"Prosfora_{num}.pdf")
-        if not os.path.exists(path):
-            make_pdf(q, path)
-        open_folder_and_select(path)
+        open_folder_and_select(self._ensure_pdf(q))
 
     # ---------- ΝΕΑ ΠΡΟΣΦΟΡΑ (μία οθόνη: γράψε -> PDF) ----------
     def page_new(self):
@@ -1957,6 +2170,7 @@ class App(ctk.CTk):
                 "image": L["image"],
                 "qty": L["qty"],
                 "price": L["price"],
+                "unit": L["unit"],
                 "materials": L.get("materials", [])
             } for L in lines if L.get("image") or (L.get("width") and L.get("height"))]
             labor_amt = 0.0
