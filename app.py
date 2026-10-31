@@ -3,7 +3,7 @@
 AluminaOffers v1.2.1 - Προσφορές Αλουμινάδων για Windows
 Dashboard | Νέα Προσφορά (μία οθόνη) | Κατάλογος | Στοιχεία+Λογότυπο | PDF με ΦΠΑ
 """
-__version__ = "1.2.3"
+__version__ = "1.2.4"
 import os, sqlite3, json, shutil, re, html, sys, subprocess, unicodedata, urllib.parse
 from datetime import datetime
 from tkinter import messagebox, filedialog
@@ -486,15 +486,17 @@ def fold_el(text):
         return str(text or "").lower()
 
 def dims_meters_txt(w, h):
-    """Alumil-style 3,3000 x 2,3500 (metres). Values > 10 are treated as cm."""
+    """Clean dimensions in cm: e.g. 160 × 220 εκ."""
     wn, hn = _num(w), _num(h)
     if wn is None or hn is None:
         ww = str(w or "").strip() or "-"
         hh = str(h or "").strip() or "-"
-        return f"{ww} x {hh}"
-    if max(wn, hn) > 10:
-        wn, hn = wn / 100.0, hn / 100.0
-    return f"{wn:.4f} x {hn:.4f}".replace(".", ",")
+        return f"{ww} × {hh} εκ."
+    if max(wn, hn) < 10 and max(wn, hn) > 0:
+        wn, hn = wn * 100.0, hn * 100.0
+    w_str = f"{wn:g}"
+    h_str = f"{hn:g}"
+    return f"{w_str} × {h_str} εκ."
 
 # Σειρά έχει σημασία: το "μπαλκονόπορτα" περιέχει το "πόρτα".
 _CAT_HINTS = [("συρομεν", "Συρόμενο"), ("επαλληλ", "Συρόμενο"), ("μπαλκον", "Μπαλκονόπορτα"),
@@ -933,9 +935,8 @@ def make_pdf(q, filepath):
         story.append(Spacer(1, 4))
         for idx, d in enumerate(designs, start=1):
             pth = img_path(d.get("image", ""))
-            im = pdf_image(pth, max_w=58*mm, max_h=52*mm) if pth else None
-            sch = schematic_for(d)
-            art = sch or im or Paragraph("<font color='#94a3b8'>📐 (χωρίς σχέδιο)</font>", st_small)
+            im = pdf_image(pth, max_w=26*mm, max_h=24*mm) if pth else None
+            art = im or Paragraph("<font size=14 color='#94a3b8'>📐</font>", ParagraphStyle('art_c', fontName=FONT, alignment=1))
             try:
                 dq = float(d.get("qty", 1) or 1)
             except Exception:
@@ -944,31 +945,24 @@ def make_pdf(q, filepath):
             raw_name = str(d.get("name") or "").strip() or "Κούφωμα"
             title = f"{idx}. {raw_name.upper()}"
             if code:
-                title += f"  ({code})"
+                title += f" ({code})"
             location_str = str(d.get("location") or "").strip()
             series = str(d.get("series") or d.get("category") or "—").strip() or "—"
             color = str(d.get("color") or "—").strip() or "—"
             dim_txt = dims_meters_txt(d.get("width"), d.get("height"))
 
-            spec = Table([
-                [Paragraph("Σειρά", st_th2), Paragraph("Χρώμα", st_th2),
-                 Paragraph("Πλάτος x Ύψος", st_th2), Paragraph("Τεμάχια", st_th2)],
-                [Paragraph(esc(series), st_td2), Paragraph(esc(color), st_td2),
-                 Paragraph(esc(dim_txt), st_td2), Paragraph(f"<b>{dq:g}</b>", st_td2)],
-            ], colWidths=[28*mm, 28*mm, 32*mm, 18*mm])
-            spec.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
-                ('GRID', (0, 0), (-1, -1), 0.35, colors.HexColor("#cbd5e1")),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('TOPPADDING', (0, 0), (-1, -1), 3),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-                ('LEFTPADDING', (0, 0), (-1, -1), 4),
-                ('ALIGN', (3, 0), (3, -1), 'CENTER'),
-            ]))
-            raw_descr = str(d.get("descr") or "").strip()
-            clean_lines = [esc(line.strip()) for line in raw_descr.splitlines() if line.strip()]
-            formatted_desc = "<br/>".join(clean_lines) if clean_lines else ""
-            desc_p = Paragraph(formatted_desc, st_spec) if formatted_desc else Paragraph("&nbsp;", st_spec)
+            clean_lines = [esc(l.strip()) for l in str(d.get("descr") or "").splitlines() if l.strip()]
+            desc_inline = " • ".join(clean_lines[:2])
+
+            mid_parts = [
+                f"<font size=9.5 color='#0f172a'><b>{esc(title)}</b></font>" +
+                (f" &nbsp;<font size=8.5 color='#1d4ed8'><b>• Τοποθέτηση: {esc(location_str)}</b></font>" if location_str else ""),
+                f"<font size=8 color='#475569'>Σειρά: <b>{esc(series)}</b> &nbsp;|&nbsp; Χρώμα: <b>{esc(color)}</b> &nbsp;|&nbsp; Διαστάσεις: <b>{esc(dim_txt)}</b></font>"
+            ]
+            if desc_inline:
+                mid_parts.append(f"<font size=7.5 color='#64748b'>{desc_inline}</font>")
+            mid_html = "<br/>".join(mid_parts)
+
             try:
                 unit_price = float(d.get("price", 0) or 0)
             except Exception:
@@ -976,47 +970,23 @@ def make_pdf(q, filepath):
             
             tot_price = unit_price * dq
             if unit_price > 0:
-                price_str = f"<font size=9 color='#64748b'>Τιμή μον.: {fmt(unit_price)} &nbsp;|&nbsp; </font><font size=12 color='#15803d'><b>ΣΥΝΟΛΟ: {fmt(tot_price)}</b></font>"
+                price_html = (f"<font size=8 color='#64748b'>{dq:g} τεμ. × {fmt(unit_price)}</font><br/>"
+                              f"<font size=11 color='#15803d'><b>{fmt(tot_price)}</b></font>")
             else:
-                price_str = ""
-            price_cell = Paragraph(price_str, ParagraphStyle('pr_c', fontName=FONT, fontSize=11, leading=14, alignment=2))
+                price_html = f"<font size=9 color='#64748b'><b>{dq:g} τεμ.</b></font>"
 
-            right = Table([[spec], [Spacer(1, 2)], [desc_p], [Spacer(1, 3)], [price_cell]], colWidths=[106*mm])
-            right.setStyle(TableStyle([
-                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                ('TOPPADDING', (0, 0), (-1, -1), 1),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
-                ('LEFTPADDING', (0, 0), (-1, -1), 0),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 0),
-            ]))
-            body = Table([[art, right]], colWidths=[66*mm, 108*mm])
-            body.setStyle(TableStyle([
-                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                ('LEFTPADDING', (0, 0), (-1, -1), 4),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 4),
-                ('TOPPADDING', (0, 0), (-1, -1), 6),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                ('BACKGROUND', (0, 0), (-1, -1), colors.white),
-            ]))
-            hdr_left = Paragraph(f"<font color='white'><b>{esc(title)}</b></font>", st_cardh)
-            hdr_right = Paragraph(f"<font color='#bfdbfe'><b>{esc(location_str)}</b></font>" if location_str else "",
-                                  ParagraphStyle('hdr_r', fontName=FONT, fontSize=8.5, leading=11, textColor=colors.HexColor("#bfdbfe"), alignment=2))
-            head = Table([[hdr_left, hdr_right]], colWidths=[120*mm, 54*mm])
-            head.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, -1), HEADBAR),
+            card = Table([[art, Paragraph(mid_html, st_n), Paragraph(price_html, ParagraphStyle('r_pr', fontName=FONT, alignment=2, leading=13))]],
+                         colWidths=[28*mm, 106*mm, 40*mm])
+            card.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, -1), LIGHT_BG),
+                ('ROUNDEDCORNERS', [6, 6, 6, 6]),
+                ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
                 ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('ALIGN', (0, 0), (0, -1), 'CENTER'),
                 ('TOPPADDING', (0, 0), (-1, -1), 4),
                 ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-                ('LEFTPADDING', (0, 0), (-1, -1), 8),
+                ('LEFTPADDING', (0, 0), (-1, -1), 6),
                 ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-            ]))
-            card = Table([[head], [body]], colWidths=[174*mm])
-            card.setStyle(TableStyle([
-                ('BOX', (0, 0), (-1, -1), 0.6, colors.HexColor("#cbd5e1")),
-                ('LEFTPADDING', (0, 0), (-1, -1), 0),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 0),
-                ('TOPPADDING', (0, 0), (-1, -1), 0),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
             ]))
             parts = [card]
             dm = d.get("materials") or []
@@ -1045,14 +1015,14 @@ def make_pdf(q, filepath):
                     ('GRID', (0, 0), (-1, -1), 0.4, colors.HexColor("#cbd5e1")),
                     ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, LIGHT_BG]),
                     ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                    ('TOPPADDING', (0, 0), (-1, -1), 4), ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                    ('TOPPADDING', (0, 0), (-1, -1), 3), ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
                     ('LEFTPADDING', (0, 0), (-1, -1), 6),
                     ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
                 ]))
-                parts.append(Spacer(1, 3))
+                parts.append(Spacer(1, 2))
                 parts.append(mt)
             story.append(KeepTogether(parts))
-            story.append(Spacer(1, 6))
+            story.append(Spacer(1, 4))
 
     if loose_items:
         sec_title = "ΣΥΜΠΛΗΡΩΜΑΤΙΚΑ ΥΛΙΚΑ / ΠΑΡΕΛΚΟΜΕΝΑ" if designs else "ΑΝΑΛΥΤΙΚΗ ΠΡΟΣΦΟΡΑ ΥΛΙΚΩΝ"
