@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-AluminaOffers v1.2.1 - Προσφορές Αλουμινάδων για Windows
+AluminaOffers v1.2.6 - Προσφορές Αλουμινάδων για Windows
 Dashboard | Νέα Προσφορά (μία οθόνη) | Κατάλογος | Στοιχεία+Λογότυπο | PDF με ΦΠΑ
 """
-__version__ = "1.2.5"
+__version__ = "1.2.6"
 import os, sqlite3, json, shutil, re, html, sys, subprocess, unicodedata, urllib.parse
 from datetime import datetime
 from tkinter import messagebox, filedialog
@@ -860,6 +860,7 @@ def make_pdf(q, filepath):
     st_n = ParagraphStyle('n', fontName=FONT, fontSize=9.5, textColor=DARK, leading=13)
     st_small = ParagraphStyle('s', fontName=FONT, fontSize=8.5, textColor=colors.grey, leading=11)
     st_cell = ParagraphStyle('c', fontName=FONT, fontSize=9, leading=12)
+    st_cell_small = ParagraphStyle('cs', fontName=FONT, fontSize=7.5, leading=10, textColor=DARK)
     st_cellb = ParagraphStyle('cb', fontName=FONTB, fontSize=9, leading=12)
     st_cellh = ParagraphStyle('ch', fontName=FONTB, fontSize=9, leading=12, textColor=colors.white)
     st_right = ParagraphStyle('r', fontName=FONT, fontSize=10, leading=14, alignment=2)
@@ -1007,27 +1008,77 @@ def make_pdf(q, filepath):
         sec_title = "ΣΥΜΠΛΗΡΩΜΑΤΙΚΑ ΥΛΙΚΑ / ΠΑΡΕΛΚΟΜΕΝΑ" if designs else "ΑΝΑΛΥΤΙΚΗ ΠΡΟΣΦΟΡΑ ΥΛΙΚΩΝ"
         story.append(Paragraph(sec_title, st_h))
         story.append(Spacer(1, 4))
-        data = [[Paragraph("<b>Περιγραφή Υλικού</b>", st_cellh), Paragraph("<b>Ποσ.</b>", st_cellh),
+        data = [[Paragraph("<b>Εικόνα</b>", st_cellh), Paragraph("<b>Περιγραφή Υλικού</b>", st_cellh), Paragraph("<b>Ποσ.</b>", st_cellh),
                  Paragraph("<b>Μον.</b>", st_cellh), Paragraph("<b>Τιμή μον.</b>", st_cellh),
                  Paragraph("<b>Σύνολο</b>", st_cellh)]]
         for it in loose_items:
             qty = float(it.get("qty", 0)); pr = float(it.get("price", 0))
+            item_name = str(it.get("name", "")).lower()
+            
+            # Try to find a matching thumbnail image based on keywords
+            img_cell = None
+            thumb_files = os.listdir(IMG_DIR) if os.path.exists(IMG_DIR) else []
+            matched_img = None
+            
+            # Priority matching based on item name keywords (Greek and English)
+            if "shutter" in item_name and "screen" in item_name:
+                matched_img = "thumb_s350_shutter_screen.png"
+            elif "shutter" in item_name:
+                matched_img = "thumb_m9660_casement_shutter.png"
+            elif "screen" in item_name or "σίτα" in item_name:
+                matched_img = "thumb_s350_screen.png"
+            elif "door" in item_name or "πόρτα" in item_name:
+                matched_img = "thumb_door.png"
+            elif "fixed" in item_name or "σταθερό" in item_name:
+                matched_img = "thumb_fixed.png"
+            elif "casement" in item_name or "επάλληλο" in item_name:
+                matched_img = "thumb_m9660_single_casement.png"
+            elif "sliding" in item_name or "συρόμενο" in item_name:
+                matched_img = "thumb_s350_simple.png"
+            elif "transom" in item_name:
+                matched_img = "thumb_m9660_transom.png"
+            elif "europa" in item_name or "hybrid" in item_name:
+                matched_img = "thumb_s350_simple.png"
+            elif "διφυλλο" in item_name or "επαλληλο" in item_name:
+                matched_img = "thumb_m9660_single_casement.png"
+            
+            # Fallback: try to find any matching file if priority didn't work
+            if not matched_img and thumb_files:
+                for thumb in thumb_files:
+                    thumb_lower = thumb.lower()
+                    if any(kw in item_name for kw in ["shutter", "screen", "door", "fixed", "casement", "sliding", "transom", "europa", "hybrid", "δίφυλλο", "επαλληλο", "σίτα", "πόρτα", "σταθερό", "συρόμενο"]):
+                        if kw in thumb_lower:
+                            matched_img = thumb
+                            break
+            
+            if matched_img and matched_img in thumb_files:
+                img_path_full = os.path.join(IMG_DIR, matched_img)
+                img = pdf_image(img_path_full, max_w=20*mm, max_h=18*mm)
+                img_cell = img
+            else:
+                img_cell = Paragraph("<font size=10 color='#cbd5e1'>▢</font>", ParagraphStyle('noimg', fontName=FONT, alignment=1))
+            
+            # Use the full description as-is
+            desc_html = f"<font size=7.5 color='#0f172a'>{esc(it.get('name', ''))}</font>"
+            
             data.append([
-                Paragraph(esc(it.get("name", "")), st_cell),
+                img_cell,
+                Paragraph(desc_html, st_cell_small),
                 Paragraph(str(qty).rstrip("0").rstrip(".") if "." in str(qty) else str(qty), st_cell),
                 Paragraph(esc(it.get("unit", "")), st_cell),
                 Paragraph(fmt(pr), st_cell),
                 Paragraph(fmt(qty*pr), st_cell),
             ])
-        t = Table(data, colWidths=[80*mm, 16*mm, 16*mm, 30*mm, 32*mm], repeatRows=1)
+        t = Table(data, colWidths=[22*mm, 68*mm, 14*mm, 14*mm, 28*mm, 28*mm], repeatRows=1)
         t.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), DARK),
+            ('BACKGROUND', (0, 0), (-1, 0), BLUE),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('GRID', (0, 0), (-1, -1), 0.4, colors.HexColor("#cbd5e1")),
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, LIGHT_BG]),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ALIGN', (0, 0), (0, -1), 'CENTER'),
+            ('ALIGN', (2, 0), (-1, -1), 'CENTER'),
             ('TOPPADDING', (0, 0), (-1, -1), 5), ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-            ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
         ]))
         story.append(t)
         story.append(Spacer(1, 8))
@@ -1045,7 +1096,7 @@ def make_pdf(q, filepath):
         labor_table = Table(labor_rows, colWidths=[124*mm, 50*mm])
         labor_table.setStyle(TableStyle([
             ('SPAN', (0, 0), (1, 0)),
-            ('BACKGROUND', (0, 0), (1, 0), colors.HexColor("#334155")),
+            ('BACKGROUND', (0, 0), (1, 0), BLUE),
             ('TOPPADDING', (0, 0), (1, 0), 4),
             ('BOTTOMPADDING', (0, 0), (1, 0), 4),
             ('LEFTPADDING', (0, 0), (1, 0), 8),
