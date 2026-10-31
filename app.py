@@ -1083,56 +1083,23 @@ def make_pdf(q, filepath):
         story.append(t)
         story.append(Spacer(1, 8))
 
-    # Πλαίσιο Εργασίας / Τοποθέτησης κάτω από τα προϊόντα
-    if include_labor and labor_amt > 0:
-        clean_lines = [esc(l.strip()) for l in labor_desc.splitlines() if l.strip()]
-        f_labor = "<br/>".join(clean_lines) if clean_lines else "Εργασία &amp; Τοποθέτηση κουφωμάτων"
-        labor_rows = [
-            [Paragraph("<b>ΕΡΓΑΣΙΑ &amp; ΤΟΠΟΘΕΤΗΣΗ</b>", st_cellh), ""],
-            [Paragraph(f_labor, ParagraphStyle('ld', fontName=FONT, fontSize=8.5, leading=12, textColor=DARK)),
-             Paragraph(f"<font size=8 color='#64748b'>Κόστος Εργασίας (χωρίς ΦΠΑ):</font><br/><font size=11 color='#1e3a8a'><b>{fmt(labor_amt)}</b></font>",
-                       ParagraphStyle('lp', fontName=FONT, fontSize=9, alignment=2, leading=13))]
-        ]
-        labor_table = Table(labor_rows, colWidths=[124*mm, 50*mm])
-        labor_table.setStyle(TableStyle([
-            ('SPAN', (0, 0), (1, 0)),
-            ('BACKGROUND', (0, 0), (1, 0), BLUE),
-            ('TOPPADDING', (0, 0), (1, 0), 4),
-            ('BOTTOMPADDING', (0, 0), (1, 0), 4),
-            ('LEFTPADDING', (0, 0), (1, 0), 8),
-            ('BOX', (0, 0), (-1, -1), 0.6, colors.HexColor("#cbd5e1")),
-            ('ROUNDEDCORNERS', [6, 6, 6, 6]),
-            ('BACKGROUND', (0, 1), (-1, 1), LIGHT_BG),
-            ('VALIGN', (0, 1), (-1, -1), 'MIDDLE'),
-            ('TOPPADDING', (0, 1), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
-            ('LEFTPADDING', (0, 1), (-1, -1), 8),
-            ('RIGHTPADDING', (0, 1), (-1, -1), 8),
-        ]))
-        story.append(labor_table)
-        story.append(Spacer(1, 8))
-
+    # Καθαρή αξία, ΦΠΑ και τέλος τιμή — ομαδοποιημένα σε έναν ενωμένο πίνακα
     totals = []
-    if include_labor and labor_amt > 0:
-        mat_cost = max(0.0, subtotal_val - labor_amt)
-        totals.append([Paragraph("Κόστος Κουφωμάτων &amp; Υλικών (χωρίς ΦΠΑ):", st_right), Paragraph(fmt(mat_cost), st_right)])
-        totals.append([Paragraph("Κόστος Εργασίας &amp; Τοποθέτησης (χωρίς ΦΠΑ):", st_right), Paragraph(fmt(labor_amt), st_right)])
-        totals.append([Paragraph("<b>Καθαρή Αξία (χωρίς ΦΠΑ):</b>", st_right), Paragraph(f"<b>{fmt(subtotal_val)}</b>", st_right)])
-    else:
-        totals.append([Paragraph("<b>Καθαρή Αξία Υλικών &amp; Κουφωμάτων (χωρίς ΦΠΑ):</b>", st_right), Paragraph(f"<b>{fmt(subtotal_val)}</b>", st_right)])
-
+    totals.append([Paragraph("<b>Καθαρή Αξία (χωρίς ΦΠΑ):</b>", st_right), Paragraph(f"<b>{fmt(subtotal_val)}</b>", st_right)])
     totals.append([Paragraph(f"ΦΠΑ {q['vat_rate']}%:", st_right), Paragraph(fmt(q["vat_amount"]), st_right)])
+    totals.append([Paragraph("ΣΥΝΟΛΟ ΜΕ ΦΠΑ", ParagraphStyle('rt_lbl', fontName=FONTB, fontSize=12, textColor=colors.white, alignment=2)),
+                      Paragraph(fmt(q["total"]), ParagraphStyle('rt_val', fontName=FONTB, fontSize=13, leading=16, alignment=2, textColor=colors.white))])
     tt = Table(totals, colWidths=[114*mm, 60*mm])
-    tt.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('TOPPADDING', (0, 0), (-1, -1), 3), ('BOTTOMPADDING', (0, 0), (-1, -1), 3)]))
+    tt.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 5), ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ('BACKGROUND', (0, 0), (-1, -2), LIGHT_BG),
+        ('BACKGROUND', (0, -1), (-1, -1), BLUE),
+        ('BOX', (0, 0), (-1, -1), 0.6, colors.HexColor("#cbd5e1")),
+        ('ROUNDEDCORNERS', [6, 6, 6, 6]),
+        ('LINEBELOW', (0, -2), (-1, -2), 0.4, colors.HexColor("#cbd5e1")),
+    ]))
     story.append(tt)
-    story.append(Spacer(1, 4))
-    totbox = Table([[Paragraph("ΣΥΝΟΛΙΚΗ ΤΙΜΗ ΜΕ ΦΠΑ", ParagraphStyle('l', fontName=FONTB, fontSize=12, textColor=colors.white, leading=16)),
-                      Paragraph(fmt(q["total"]), st_total)]], colWidths=[114*mm, 60*mm])
-    totbox.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, -1), BLUE),
-        ('ROUNDEDCORNERS', [6, 6, 6, 6]), ('TOPPADDING', (0, 0), (-1, -1), 8), ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-        ('LEFTPADDING', (0, 0), (-1, -1), 10), ('RIGHTPADDING', (0, 0), (-1, -1), 10)]))
-    story.append(totbox)
     story.append(Spacer(1, 10))
     if q.get("notes"):
         story.append(Paragraph("<b>Παρατηρήσεις:</b>", st_n))
