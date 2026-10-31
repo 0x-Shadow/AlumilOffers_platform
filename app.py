@@ -3,7 +3,7 @@
 AluminaOffers v1.2.1 - Προσφορές Αλουμινάδων για Windows
 Dashboard | Νέα Προσφορά (μία οθόνη) | Κατάλογος | Στοιχεία+Λογότυπο | PDF με ΦΠΑ
 """
-__version__ = "1.2.4"
+__version__ = "1.2.5"
 import os, sqlite3, json, shutil, re, html, sys, subprocess, unicodedata, urllib.parse
 from datetime import datetime
 from tkinter import messagebox, filedialog
@@ -931,8 +931,24 @@ def make_pdf(q, filepath):
         loose_items = items
 
     if designs:
-        story.append(Paragraph("ΚΟΥΦΩΜΑΤΑ / ΚΑΤΑΣΚΕΥΕΣ", st_h))
-        story.append(Spacer(1, 4))
+        prod_rows = [
+            [Paragraph("<b>ΚΟΥΦΩΜΑΤΑ &amp; ΚΑΤΑΣΚΕΥΕΣ</b>", st_cellh), "", ""]
+        ]
+        tstyle = [
+            ('SPAN', (0, 0), (2, 0)),
+            ('BACKGROUND', (0, 0), (2, 0), HEADBAR),
+            ('TOPPADDING', (0, 0), (2, 0), 5),
+            ('BOTTOMPADDING', (0, 0), (2, 0), 5),
+            ('LEFTPADDING', (0, 0), (2, 0), 8),
+            ('BOX', (0, 0), (-1, -1), 0.6, colors.HexColor("#cbd5e1")),
+            ('ROUNDEDCORNERS', [6, 6, 6, 6]),
+            ('VALIGN', (0, 1), (-1, -1), 'MIDDLE'),
+            ('ALIGN', (0, 1), (0, -1), 'CENTER'),
+            ('TOPPADDING', (0, 1), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 4),
+            ('LEFTPADDING', (0, 1), (-1, -1), 6),
+            ('RIGHTPADDING', (0, 1), (-1, -1), 8),
+        ]
         for idx, d in enumerate(designs, start=1):
             pth = img_path(d.get("image", ""))
             im = pdf_image(pth, max_w=26*mm, max_h=24*mm) if pth else None
@@ -975,58 +991,20 @@ def make_pdf(q, filepath):
             else:
                 price_html = f"<font size=9 color='#64748b'><b>{dq:g} τεμ.</b></font>"
 
-            card = Table([[art, Paragraph(mid_html, st_n), Paragraph(price_html, ParagraphStyle('r_pr', fontName=FONT, alignment=2, leading=13))]],
-                         colWidths=[28*mm, 106*mm, 40*mm])
-            card.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, -1), LIGHT_BG),
-                ('ROUNDEDCORNERS', [6, 6, 6, 6]),
-                ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('ALIGN', (0, 0), (0, -1), 'CENTER'),
-                ('TOPPADDING', (0, 0), (-1, -1), 4),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-                ('LEFTPADDING', (0, 0), (-1, -1), 6),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-            ]))
-            parts = [card]
-            dm = d.get("materials") or []
-            if isinstance(dm, str):
-                try:
-                    dm = json.loads(dm)
-                except Exception:
-                    dm = []
-            if dm:
-                mrows = [[Paragraph("<b>Υλικό κατασκευής</b>", st_cellh),
-                          Paragraph("<b>Ποσ.</b>", st_cellh),
-                          Paragraph("<b>Τιμή</b>", st_cellh)]]
-                for m in dm:
-                    try:
-                        mq = float(m.get("qty", 0) or 0) * dq
-                    except Exception:
-                        mq = 0
-                    mrows.append([
-                        Paragraph(esc(m.get("name", "")), st_cell),
-                        Paragraph(esc(f"{mq:g} {m.get('unit','')}").strip(), st_cell),
-                        Paragraph(fmt(m.get("price", 0)), st_cell),
-                    ])
-                mt = Table(mrows, colWidths=[98*mm, 38*mm, 38*mm])
-                mt.setStyle(TableStyle([
-                    ('BACKGROUND', (0, 0), (-1, 0), DARK),
-                    ('GRID', (0, 0), (-1, -1), 0.4, colors.HexColor("#cbd5e1")),
-                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, LIGHT_BG]),
-                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                    ('TOPPADDING', (0, 0), (-1, -1), 3), ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-                    ('LEFTPADDING', (0, 0), (-1, -1), 6),
-                    ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
-                ]))
-                parts.append(Spacer(1, 2))
-                parts.append(mt)
-            story.append(KeepTogether(parts))
-            story.append(Spacer(1, 4))
+            prod_rows.append([art, Paragraph(mid_html, st_n), Paragraph(price_html, ParagraphStyle('r_pr', fontName=FONT, alignment=2, leading=13))])
+            r_idx = len(prod_rows) - 1
+            bg_col = colors.white if r_idx % 2 == 1 else LIGHT_BG
+            tstyle.append(('BACKGROUND', (0, r_idx), (-1, r_idx), bg_col))
+            if r_idx > 1:
+                tstyle.append(('LINEABOVE', (0, r_idx), (-1, r_idx), 0.4, colors.HexColor("#e2e8f0")))
+
+        prod_table = Table(prod_rows, colWidths=[28*mm, 106*mm, 40*mm], repeatRows=1)
+        prod_table.setStyle(TableStyle(tstyle))
+        story.append(prod_table)
+        story.append(Spacer(1, 8))
 
     if loose_items:
         sec_title = "ΣΥΜΠΛΗΡΩΜΑΤΙΚΑ ΥΛΙΚΑ / ΠΑΡΕΛΚΟΜΕΝΑ" if designs else "ΑΝΑΛΥΤΙΚΗ ΠΡΟΣΦΟΡΑ ΥΛΙΚΩΝ"
-        story.append(Spacer(1, 4))
         story.append(Paragraph(sec_title, st_h))
         story.append(Spacer(1, 4))
         data = [[Paragraph("<b>Περιγραφή Υλικού</b>", st_cellh), Paragraph("<b>Ποσ.</b>", st_cellh),
@@ -1054,16 +1032,43 @@ def make_pdf(q, filepath):
         story.append(t)
         story.append(Spacer(1, 8))
 
+    # Πλαίσιο Εργασίας / Τοποθέτησης κάτω από τα προϊόντα
+    if include_labor and labor_amt > 0:
+        clean_lines = [esc(l.strip()) for l in labor_desc.splitlines() if l.strip()]
+        f_labor = "<br/>".join(clean_lines) if clean_lines else "Εργασία &amp; Τοποθέτηση κουφωμάτων"
+        labor_rows = [
+            [Paragraph("<b>ΕΡΓΑΣΙΑ &amp; ΤΟΠΟΘΕΤΗΣΗ</b>", st_cellh), ""],
+            [Paragraph(f_labor, ParagraphStyle('ld', fontName=FONT, fontSize=8.5, leading=12, textColor=DARK)),
+             Paragraph(f"<font size=8 color='#64748b'>Κόστος Εργασίας (χωρίς ΦΠΑ):</font><br/><font size=11 color='#1e3a8a'><b>{fmt(labor_amt)}</b></font>",
+                       ParagraphStyle('lp', fontName=FONT, fontSize=9, alignment=2, leading=13))]
+        ]
+        labor_table = Table(labor_rows, colWidths=[124*mm, 50*mm])
+        labor_table.setStyle(TableStyle([
+            ('SPAN', (0, 0), (1, 0)),
+            ('BACKGROUND', (0, 0), (1, 0), colors.HexColor("#334155")),
+            ('TOPPADDING', (0, 0), (1, 0), 4),
+            ('BOTTOMPADDING', (0, 0), (1, 0), 4),
+            ('LEFTPADDING', (0, 0), (1, 0), 8),
+            ('BOX', (0, 0), (-1, -1), 0.6, colors.HexColor("#cbd5e1")),
+            ('ROUNDEDCORNERS', [6, 6, 6, 6]),
+            ('BACKGROUND', (0, 1), (-1, 1), LIGHT_BG),
+            ('VALIGN', (0, 1), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 1), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+            ('LEFTPADDING', (0, 1), (-1, -1), 8),
+            ('RIGHTPADDING', (0, 1), (-1, -1), 8),
+        ]))
+        story.append(labor_table)
+        story.append(Spacer(1, 8))
+
     totals = []
     if include_labor and labor_amt > 0:
         mat_cost = max(0.0, subtotal_val - labor_amt)
-        totals.append([Paragraph("Κόστος Κουφωμάτων & Υλικών:", st_right), Paragraph(fmt(mat_cost), st_right)])
-        clean_lines = [esc(l.strip()) for l in labor_desc.splitlines() if l.strip()]
-        f_labor = "<br/>".join(clean_lines) if clean_lines else "Εργασία & Τοποθέτηση"
-        totals.append([Paragraph(f"<b>{f_labor}:</b>", st_right), Paragraph(fmt(labor_amt), st_right)])
-        totals.append([Paragraph("<b>Καθαρή Αξία (χωρίς ΦΠΑ):</b>", st_right), Paragraph(fmt(subtotal_val), st_right)])
+        totals.append([Paragraph("Κόστος Κουφωμάτων &amp; Υλικών (χωρίς ΦΠΑ):", st_right), Paragraph(fmt(mat_cost), st_right)])
+        totals.append([Paragraph("Κόστος Εργασίας &amp; Τοποθέτησης (χωρίς ΦΠΑ):", st_right), Paragraph(fmt(labor_amt), st_right)])
+        totals.append([Paragraph("<b>Καθαρή Αξία (χωρίς ΦΠΑ):</b>", st_right), Paragraph(f"<b>{fmt(subtotal_val)}</b>", st_right)])
     else:
-        totals.append([Paragraph("<b>Καθαρή Αξία Υλικών & Κουφωμάτων (χωρίς ΦΠΑ):</b>", st_right), Paragraph(fmt(subtotal_val), st_right)])
+        totals.append([Paragraph("<b>Καθαρή Αξία Υλικών &amp; Κουφωμάτων (χωρίς ΦΠΑ):</b>", st_right), Paragraph(f"<b>{fmt(subtotal_val)}</b>", st_right)])
 
     totals.append([Paragraph(f"ΦΠΑ {q['vat_rate']}%:", st_right), Paragraph(fmt(q["vat_amount"]), st_right)])
     tt = Table(totals, colWidths=[114*mm, 60*mm])
@@ -1071,7 +1076,7 @@ def make_pdf(q, filepath):
         ('TOPPADDING', (0, 0), (-1, -1), 3), ('BOTTOMPADDING', (0, 0), (-1, -1), 3)]))
     story.append(tt)
     story.append(Spacer(1, 4))
-    totbox = Table([[Paragraph("ΣΥΝΟΛΟ ΜΕ ΦΠΑ", ParagraphStyle('l', fontName=FONTB, fontSize=12, textColor=colors.white, leading=16)),
+    totbox = Table([[Paragraph("ΣΥΝΟΛΙΚΗ ΤΙΜΗ ΜΕ ΦΠΑ", ParagraphStyle('l', fontName=FONTB, fontSize=12, textColor=colors.white, leading=16)),
                       Paragraph(fmt(q["total"]), st_total)]], colWidths=[114*mm, 60*mm])
     totbox.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, -1), BLUE),
         ('ROUNDEDCORNERS', [6, 6, 6, 6]), ('TOPPADDING', (0, 0), (-1, -1), 8), ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
@@ -1392,46 +1397,7 @@ class App(ctk.CTk):
             qbar = ctk.CTkFrame(qbox, fg_color="transparent")
             qbar.pack(fill="x", padx=10, pady=(2, 10))
 
-        active_row_ref = [None]
-
         mid = self.card(wrap)
-
-        # Μπάρα Γρήγορων Διαστάσεων
-        dim_bar = ctk.CTkFrame(mid, fg_color="#f8fafc", corner_radius=10, border_width=1, border_color="#e2e8f0")
-        dim_bar.pack(fill="x", padx=14, pady=(10, 4))
-        ctk.CTkLabel(dim_bar, text="📏 Γρήγορες Διαστάσεις (εκ.):", font=("Arial", 11, "bold"), text_color=TXTD).pack(side="left", padx=(10, 4), pady=5)
-
-        COMMON_DIMS = [
-            ("140×220", "140", "220"),
-            ("160×220", "160", "220"),
-            ("120×220", "120", "220"),
-            ("80×220",  "80",  "220"),
-            ("120×120", "120", "120"),
-            ("140×120", "140", "120"),
-            ("100×120", "100", "120"),
-            ("80×120",  "80",  "120"),
-            ("90×210",  "90",  "210"),
-            ("60×60",   "60",  "60"),
-        ]
-
-        def set_quick_dim(wv, hv):
-            r = active_row_ref[0]
-            if not r or r not in rows:
-                if rows:
-                    r = rows[-1]
-                else:
-                    r = add_row()
-            r["e_w"].delete(0, "end"); r["e_w"].insert(0, wv)
-            r["e_h"].delete(0, "end"); r["e_h"].insert(0, hv)
-            refresh()
-            r["e_p"].focus_set()
-
-        for lbl, wv, hv in COMMON_DIMS:
-            ctk.CTkButton(dim_bar, text=lbl, font=("Arial", 11, "bold"),
-                          width=64, height=26, fg_color="white", text_color=TXTD,
-                          hover_color="#e2e8f0", border_width=1, border_color="#cbd5e1",
-                          command=lambda w=wv, h=hv: set_quick_dim(w, h)).pack(side="left", padx=2, pady=5)
-
         hdr = ctk.CTkFrame(mid, fg_color=CARD); hdr.pack(fill="x", padx=14, pady=(10, 0))
         for txt, w in [("Σχέδιο / Τύπος (πάτα για αναζήτηση)", 280), ("Π εκ.", 58),
                        ("Υ εκ.", 58), ("Τοποθέτηση", 125), ("Τεμ", 44), ("Τιμή €", 82), ("Σύνολο", 92), ("", 95)]:
@@ -1704,6 +1670,30 @@ class App(ctk.CTk):
                     ctk.CTkButton(btn_frame, text="ΕΠΙΛΟΓΗ ➔", font=("Arial", 12, "bold"),
                                   fg_color="#16a34a", hover_color="#15803d", width=100, height=36,
                                   command=lambda dd=d: choose(dd)).pack()
+
+                    def make_card_clickable(widget, target_d):
+                        try:
+                            widget.configure(cursor="hand2")
+                        except Exception:
+                            pass
+                        widget.bind("<Button-1>", lambda ev, dd=target_d: choose(dd), add="+")
+                        for ch in widget.winfo_children():
+                            make_card_clickable(ch, target_d)
+
+                    make_card_clickable(card, d)
+
+                    def on_card_enter(ev, c=card):
+                        try:
+                            c.configure(fg_color="#eff6ff", border_color=BLUEH)
+                        except Exception:
+                            pass
+                    def on_card_leave(ev, c=card):
+                        try:
+                            c.configure(fg_color="white", border_color="#e2e8f0")
+                        except Exception:
+                            pass
+                    card.bind("<Enter>", on_card_enter)
+                    card.bind("<Leave>", on_card_leave)
                 if n == 0:
                     ctk.CTkLabel(lst, text="Δεν βρέθηκε σχέδιο με αυτή την αναζήτηση.", font=("Arial", 13), text_color=TXTG).pack(pady=40)
 
@@ -1850,9 +1840,19 @@ class App(ctk.CTk):
             return row
 
         brow = ctk.CTkFrame(mid, fg_color=CARD); brow.pack(fill="x", padx=14, pady=(0, 8))
-        ctk.CTkButton(brow, text="＋ Προσθήκη γραμμής", font=("Arial", 13, "bold"),
-                      fg_color=ACCENT, command=add_row).pack(side="left")
-        ctk.CTkLabel(brow, text="💡 Πάτα «📐 Διάλεξε Σχέδιο» για άμεση επιλογή, ή «📋» για γρήγορη αντιγραφή",
+        def add_and_pick():
+            target = None
+            if len(rows) == 1 and rows[0]["b_des"].cget("text") == "📐 Διάλεξε Σχέδιο..." and not rows[0]["e_w"].get() and not rows[0]["e_p"].get():
+                target = rows[0]
+            if not target:
+                target = add_row()
+            pick_design(target)
+
+        ctk.CTkButton(brow, text="📐 ΔΙΑΛΕΞΕ & ΠΡΟΣΘΕΣΕ ΚΟΥΦΩΜΑ", font=("Arial", 13, "bold"),
+                      fg_color=GREEN, hover_color="#15803d", command=add_and_pick).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(brow, text="＋ Κενή γραμμή", font=("Arial", 12),
+                      fg_color="#64748b", hover_color="#475569", command=add_row).pack(side="left")
+        ctk.CTkLabel(brow, text="💡 Πατήστε οπουδήποτε στο πλαίσιο του σχεδίου για άμεση επιλογή",
                      font=("Arial", 11), text_color=TXTG).pack(side="left", padx=10)
         add_row()
         refresh()
