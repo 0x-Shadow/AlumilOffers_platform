@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-AluminaOffers v1.2.0 - Προσφορές Αλουμινάδων για Windows
+AluminaOffers v1.2.1 - Προσφορές Αλουμινάδων για Windows
 Dashboard | Νέα Προσφορά (μία οθόνη) | Κατάλογος | Στοιχεία+Λογότυπο | PDF με ΦΠΑ
 """
-__version__ = "1.2.0"
-import os, sqlite3, json, shutil, re, html, sys, subprocess, unicodedata
+__version__ = "1.2.1"
+import os, sqlite3, json, shutil, re, html, sys, subprocess, unicodedata, urllib.parse
 from datetime import datetime
 from tkinter import messagebox, filedialog
 import customtkinter as ctk
@@ -54,6 +54,39 @@ def open_path_safe(path):
             messagebox.showwarning("Προσοχή", f"Δεν άνοιξε αυτόματα:\n{path}\n{e}")
         except Exception:
             pass
+
+def open_folder_and_select(path):
+    """Open containing folder and highlight file in OS file explorer."""
+    try:
+        p = os.path.abspath(path)
+        if sys.platform.startswith("win"):
+            subprocess.run(f'explorer /select,"{p}"', check=False)
+        elif sys.platform == "darwin":
+            subprocess.run(["open", "-R", p], check=False)
+        else:
+            folder = os.path.dirname(p)
+            subprocess.run(["xdg-open", folder], check=False)
+    except Exception as e:
+        try:
+            folder = os.path.dirname(os.path.abspath(path))
+            open_path_safe(folder)
+        except Exception:
+            pass
+
+def send_whatsapp(phone, message=""):
+    """Open WhatsApp Web with optional phone number and pre-filled text."""
+    clean_phone = re.sub(r"[^\d+]", "", phone or "")
+    if clean_phone.startswith("69") and len(clean_phone) == 10:
+        clean_phone = "+30" + clean_phone
+    elif clean_phone.startswith("0030"):
+        clean_phone = "+" + clean_phone[2:]
+    
+    encoded_msg = urllib.parse.quote(message) if message else ""
+    if clean_phone:
+        url = f"https://web.whatsapp.com/send?phone={clean_phone}&text={encoded_msg}"
+    else:
+        url = f"https://web.whatsapp.com/"
+    open_path_safe(url)
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -275,6 +308,9 @@ def init_db():
         c.execute("ALTER TABLE designs ADD COLUMN color TEXT DEFAULT ''")
     if "location" not in dcols:
         c.execute("ALTER TABLE designs ADD COLUMN location TEXT DEFAULT ''")
+    if "use_count" not in dcols:
+        c.execute("ALTER TABLE designs ADD COLUMN use_count INTEGER DEFAULT 0")
+        c.execute("UPDATE designs SET use_count = 10 - (id % 10) WHERE use_count IS NULL OR use_count = 0")
     c.execute("""CREATE TABLE IF NOT EXISTS quotes(
         id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT, date TEXT,
         customer_id INTEGER, customer_name TEXT, customer_info TEXT,
@@ -283,6 +319,12 @@ def init_db():
     cols = [r[1] for r in c.execute("PRAGMA table_info(quotes)").fetchall()]
     if "designs_json" not in cols:
         c.execute("ALTER TABLE quotes ADD COLUMN designs_json TEXT DEFAULT '[]'")
+    if "include_labor" not in cols:
+        c.execute("ALTER TABLE quotes ADD COLUMN include_labor INTEGER DEFAULT 0")
+    if "labor_amount" not in cols:
+        c.execute("ALTER TABLE quotes ADD COLUMN labor_amount REAL DEFAULT 0.0")
+    if "labor_desc" not in cols:
+        c.execute("ALTER TABLE quotes ADD COLUMN labor_desc TEXT DEFAULT ''")
     c.execute("""CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT)""")
     if not c.execute("SELECT 1 FROM settings WHERE key='company'").fetchone():
         c.execute("INSERT INTO settings VALUES('company', ?)", (json.dumps({
@@ -996,10 +1038,21 @@ def make_pdf(q, filepath):
             story.append(KeepTogether(parts))
             story.append(Spacer(1, 5))
 
-    totals = [
-        [Paragraph("Αρχική Αξία (χωρίς ΦΠΑ):", st_right), Paragraph(fmt(q["subtotal"]), st_right)],
-        [Paragraph(f"ΦΠΑ {q['vat_rate']}%:", st_right), Paragraph(fmt(q["vat_amount"]), st_right)],
-    ]
+    totals = []
+    include_labor = bool(q.get("include_labor"))
+    labor_amt = float(q.get("labor_amount") or 0)
+    labor_desc = str(q.get("labor_desc") or "").strip() or "Εργασία & Τοποθέτηση κουφωμάτων"
+    subtotal_val = float(q.get("subtotal") or 0)
+
+    if include_labor and labor_amt > 0:
+        mat_cost = max(0.0, subtotal_val - labor_amt)
+        totals.append([Paragraph("Κόστος Υλικών / Κουφωμάτων:", st_right), Paragraph(fmt(mat_cost), st_right)])
+        totals.append([Paragraph(f"<b>{esc(labor_desc)}:</b>", st_right), Paragraph(fmt(labor_amt), st_right)])
+        totals.append([Paragraph("<b>Καθαρή Αξία (χωρίς ΦΠΑ):</b>", st_right), Paragraph(fmt(subtotal_val), st_right)])
+    else:
+        totals.append([Paragraph("Αρχική Αξία (χωρίς ΦΠΑ):", st_right), Paragraph(fmt(subtotal_val), st_right)])
+
+    totals.append([Paragraph(f"ΦΠΑ {q['vat_rate']}%:", st_right), Paragraph(fmt(q["vat_amount"]), st_right)])
     tt = Table(totals, colWidths=[110*mm, 60*mm])
     tt.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ('TOPPADDING', (0, 0), (-1, -1), 3), ('BOTTOMPADDING', (0, 0), (-1, -1), 3)]))
@@ -1061,6 +1114,25 @@ class App(ctk.CTk):
         self.main = ctk.CTkFrame(self, fg_color=BG, corner_radius=0)
         self.main.pack(side="right", fill="both", expand=True)
         self.show("home")
+
+    def _popup_setup(self, win):
+        """Ensure modal dialog pops up in front of the main window and grabs focus."""
+        try:
+            win.transient(self)
+        except Exception:
+            pass
+        try:
+            win.attributes("-topmost", True)
+        except Exception:
+            pass
+        win.lift()
+        win.focus_force()
+        win.after(150, lambda: (
+            (win.attributes("-topmost", False) if win.winfo_exists() else None),
+            (win.lift() if win.winfo_exists() else None),
+            (win.focus_force() if win.winfo_exists() else None),
+            (win.grab_set() if win.winfo_exists() else None)
+        ) if win.winfo_exists() else None)
 
     def clear(self):
         for w in self.main.winfo_children():
@@ -1222,9 +1294,13 @@ class App(ctk.CTk):
                 if ndes:
                     info += f"  •  {ndes} σχέδια"
                 ctk.CTkLabel(row, text=info, font=("Arial", 13), text_color=BLUEH).pack(side="left")
-                ctk.CTkButton(row, text="PDF", width=64, command=lambda qq=dict(r): self.open_pdf(qq)).pack(side="right", padx=4, pady=6)
-                ctk.CTkButton(row, text="✕", width=36, fg_color=RED,
-                              command=lambda i=r["id"]: self.del_quote(i)).pack(side="right", pady=6)
+                ctk.CTkButton(row, text="PDF", width=54, command=lambda qq=dict(r): self.open_pdf(qq)).pack(side="right", padx=2, pady=6)
+                ctk.CTkButton(row, text="📂", width=36, fg_color="#0284c7", hover_color="#0369a1",
+                              command=lambda qq=dict(r): self.open_quote_folder(qq)).pack(side="right", padx=2, pady=6)
+                ctk.CTkButton(row, text="💬", width=36, fg_color="#25D366", hover_color="#1ea952",
+                              command=lambda qq=dict(r): self.share_quote_dialog(qq)).pack(side="right", padx=2, pady=6)
+                ctk.CTkButton(row, text="✕", width=32, fg_color=RED,
+                              command=lambda i=r["id"]: self.del_quote(i)).pack(side="right", padx=2, pady=6)
             if n == 0:
                 ctk.CTkLabel(lst, text="Καμία προσφορά — πάτα «ΝΕΑ ΠΡΟΣΦΟΡΑ»!",
                              font=("Arial", 13), text_color=TXTG).pack(pady=24)
@@ -1241,6 +1317,100 @@ class App(ctk.CTk):
         path = os.path.join(PDF_DIR, f"Prosfora_{num}.pdf")
         make_pdf(q, path)
         open_path_safe(path)
+
+    def open_quote_folder(self, q):
+        num = safe_quote_number(q['number'])
+        path = os.path.join(PDF_DIR, f"Prosfora_{num}.pdf")
+        if not os.path.exists(path):
+            make_pdf(q, path)
+        open_folder_and_select(path)
+
+    def share_quote_dialog(self, q):
+        num = safe_quote_number(q['number'])
+        path = os.path.join(PDF_DIR, f"Prosfora_{num}.pdf")
+        if not os.path.exists(path):
+            make_pdf(q, path)
+        self.show_share_dialog(q, path)
+
+    def show_share_dialog(self, qobj, pdf_path):
+        win = ctk.CTkToplevel(self)
+        win.title(f"🎉 Προσφορά {qobj.get('number', '')} Έτοιμη!")
+        win.geometry("540x440")
+        self._popup_setup(win)
+
+        card = ctk.CTkFrame(win, fg_color="white", corner_radius=12)
+        card.pack(fill="both", expand=True, padx=16, pady=16)
+
+        ctk.CTkLabel(card, text="✓ Η Προσφορά Αποθηκεύτηκε με Επιτυχία!",
+                     font=("Arial", 16, "bold"), text_color=GREEN).pack(pady=(14, 4))
+
+        info_box = ctk.CTkFrame(card, fg_color="#f8fafc", corner_radius=8)
+        info_box.pack(fill="x", padx=16, pady=6)
+
+        ctk.CTkLabel(info_box, text=f"Αριθμός: {qobj.get('number')}  •  Πελάτης: {qobj.get('customer_name')}",
+                     font=("Arial", 13, "bold"), text_color="#1e293b").pack(anchor="w", padx=12, pady=(6, 2))
+        ctk.CTkLabel(info_box, text=f"Τελικό Σύνολο με ΦΠΑ: {fmt(qobj.get('total', 0))}",
+                     font=("Arial", 14, "bold"), text_color=BLUEH).pack(anchor="w", padx=12, pady=(0, 6))
+
+        ctk.CTkLabel(card, text="Εύκολη Αποστολή & Πρόσβαση στο PDF:", font=("Arial", 12, "bold"),
+                     text_color="#64748b").pack(anchor="w", padx=16, pady=(8, 4))
+
+        btns = ctk.CTkFrame(card, fg_color="transparent")
+        btns.pack(fill="x", padx=16, pady=2)
+
+        ctk.CTkButton(
+            btns, text="📂 Άνοιγμα Φακέλου με το PDF\n(έτοιμο για drag & drop σε Viber / WhatsApp)",
+            font=("Arial", 13, "bold"), fg_color="#0284c7", hover_color="#0369a1",
+            height=46,
+            command=lambda: open_folder_and_select(pdf_path)
+        ).pack(fill="x", pady=4)
+
+        ctk.CTkButton(
+            btns, text="📄 Άνοιγμα & Προβολή PDF",
+            font=("Arial", 13), fg_color="#334155", hover_color="#1e293b",
+            height=36,
+            command=lambda: open_path_safe(pdf_path)
+        ).pack(fill="x", pady=3)
+
+        row_apps = ctk.CTkFrame(btns, fg_color="transparent")
+        row_apps.pack(fill="x", pady=3)
+
+        def open_wa():
+            cinfo = qobj.get("customer_info", "")
+            phone_match = re.search(r"(\+?\d[\d\s\-]{8,15})", cinfo)
+            phone = phone_match.group(1) if phone_match else ""
+            msg = f"Γεια σας, σας στέλνουμε την προσφορά Νο {qobj.get('number')} για τα κουφώματα. Σύνολο με ΦΠΑ: {fmt(qobj.get('total', 0))}."
+            send_whatsapp(phone, msg)
+
+        ctk.CTkButton(
+            row_apps, text="💬 WhatsApp Web",
+            font=("Arial", 12, "bold"), fg_color="#25D366", hover_color="#1ea952",
+            height=36,
+            command=open_wa
+        ).pack(side="left", fill="x", expand=True, padx=(0, 4))
+
+        def copy_path():
+            try:
+                self.clipboard_clear()
+                self.clipboard_append(os.path.abspath(pdf_path))
+                self.update()
+                lbl_tip.configure(text="✓ Αντιγράφηκε η διαδρομή! Κάντε επικόλληση (Ctrl+V) στο chat.")
+            except Exception as e:
+                lbl_tip.configure(text=f"Σφάλμα: {e}")
+
+        ctk.CTkButton(
+            row_apps, text="📋 Αντιγραφή Διαδρομής",
+            font=("Arial", 12), fg_color="#6d28d9", hover_color="#5b21b6",
+            height=36,
+            command=copy_path
+        ).pack(side="left", fill="x", expand=True, padx=(4, 0))
+
+        lbl_tip = ctk.CTkLabel(card, text="💡 Tip: Σύρετε το επιλεγμένο αρχείο από το φάκελο κατευθείαν στο Viber ή WhatsApp!",
+                               font=("Arial", 11), text_color="#64748b")
+        lbl_tip.pack(pady=6)
+
+        ctk.CTkButton(card, text="Κλείσιμο", font=("Arial", 12), fg_color="#94a3b8", hover_color="#64748b",
+                      height=30, command=win.destroy).pack(pady=(2, 6))
 
     # ---------- ΝΕΑ ΠΡΟΣΦΟΡΑ (μία οθόνη: γράψε -> PDF) ----------
     def page_new(self):
@@ -1278,6 +1448,24 @@ class App(ctk.CTk):
         ctk.CTkLabel(f1, text="ΦΠΑ %:", font=("Arial", 13, "bold")).pack(side="left", padx=(10, 0))
         e_vat = ctk.CTkEntry(f1, width=55, font=("Arial", 14)); e_vat.insert(0, str(DEFAULT_FPA)); e_vat.pack(side="left", padx=6)
 
+        # Quick Bar / Δημοφιλή κουφώματα
+        c = db()
+        top_des = c.execute("""
+            SELECT * FROM designs 
+            ORDER BY COALESCE(use_count, 0) DESC, id ASC 
+            LIMIT 5
+        """).fetchall()
+        c.close()
+
+        if top_des:
+            qbox = self.card(wrap)
+            qhdr = ctk.CTkFrame(qbox, fg_color="transparent")
+            qhdr.pack(fill="x", padx=14, pady=(8, 2))
+            ctk.CTkLabel(qhdr, text="⚡ Δημοφιλή / Συχνά Κουφώματα (κλικ για άμεση προσθήκη):",
+                         font=("Arial", 12, "bold"), text_color=TXTD).pack(side="left")
+            qbar = ctk.CTkFrame(qbox, fg_color="transparent")
+            qbar.pack(fill="x", padx=10, pady=(0, 8))
+
         mid = self.card(wrap)
         hdr = ctk.CTkFrame(mid, fg_color=CARD); hdr.pack(fill="x", padx=14, pady=(10, 0))
         for txt, w in [("Σχέδιο / Τύπος (πάτα για αναζήτηση)", 280), ("Π εκ.", 58),
@@ -1285,13 +1473,46 @@ class App(ctk.CTk):
             ctk.CTkLabel(hdr, text=txt, font=("Arial", 12, "bold"), width=w, text_color=TXTG).pack(side="left", padx=3)
         rowsbox = ctk.CTkFrame(mid, fg_color=CARD); rowsbox.pack(fill="x", padx=14, pady=4)
         rows = []
+
+        # Πλαίσιο Εργασίας / Τοποθέτησης
+        labor_box = ctk.CTkFrame(mid, fg_color="#f1f5f9", corner_radius=8)
+        labor_box.pack(fill="x", padx=14, pady=(6, 6))
+
+        labor_var = ctk.BooleanVar(value=False)
+
+        def toggle_labor():
+            active = labor_var.get()
+            if active:
+                e_labor_amt.configure(state="normal", fg_color="white")
+                e_labor_desc.configure(state="normal", fg_color="white")
+            else:
+                e_labor_amt.configure(state="disabled", fg_color="#e2e8f0")
+                e_labor_desc.configure(state="disabled", fg_color="#e2e8f0")
+            refresh()
+
+        cb_labor = ctk.CTkCheckBox(labor_box, text="🛠️ Συμπερίληψη Κόστους Εργασίας / Τοποθέτησης",
+                                   font=("Arial", 12, "bold"), text_color=TXTD,
+                                   variable=labor_var, command=toggle_labor)
+        cb_labor.pack(side="left", padx=10, pady=8)
+
+        e_labor_desc = ctk.CTkEntry(labor_box, font=("Arial", 12), width=310)
+        e_labor_desc.insert(0, "Εργασία αποξήλωσης παλαιών & τοποθέτησης νέων κουφωμάτων")
+        e_labor_desc.configure(state="disabled", fg_color="#e2e8f0")
+        e_labor_desc.pack(side="left", padx=6, pady=8)
+
+        ctk.CTkLabel(labor_box, text="Ποσό €:", font=("Arial", 12, "bold"), text_color=TXTD).pack(side="left", padx=(6, 2))
+        e_labor_amt = ctk.CTkEntry(labor_box, width=80, font=("Arial", 13, "bold"), placeholder_text="0")
+        e_labor_amt.insert(0, "0")
+        e_labor_amt.configure(state="disabled", fg_color="#e2e8f0")
+        e_labor_amt.pack(side="left", padx=4, pady=8)
+
         lbl_total = ctk.CTkLabel(mid, text="", font=("Arial", 13), text_color="#334155", justify="right")
         lbl_total.pack(anchor="e", padx=18)
         lbl_big = ctk.CTkLabel(mid, text="", font=("Arial", 20, "bold"), text_color=BLUEH)
         lbl_big.pack(anchor="e", padx=18, pady=(0, 6))
 
         def refresh():
-            sub = 0.0
+            sub_mat = 0.0
             for row in rows:
                 try:
                     q = float((row["e_q"].get() or "0").replace(",", "."))
@@ -1302,24 +1523,115 @@ class App(ctk.CTk):
                 except Exception:
                     p = 0
                 q = max(0.0, min(q, 100000)); p = max(0.0, min(p, 10000000))
-                lt = q * p; sub += lt
+                lt = q * p; sub_mat += lt
                 row["l_sum"].configure(text=fmt(lt))
+
+            labor_amt = 0.0
+            if labor_var.get():
+                try:
+                    labor_amt = float((e_labor_amt.get() or "0").replace(",", "."))
+                except Exception:
+                    labor_amt = 0.0
+                labor_amt = max(0.0, min(labor_amt, 10000000))
+
+            sub = sub_mat + labor_amt
             try:
                 vr = float(e_vat.get().replace(",", ".")) if e_vat.get() else DEFAULT_FPA
             except Exception:
                 vr = DEFAULT_FPA
             vr = max(0.0, min(vr, 100.0))
             vat = sub * vr / 100
-            lbl_total.configure(text=f"Αρχική αξία: {fmt(sub)}      ΦΠΑ {vr:g}%: {fmt(vat)}")
+
+            if labor_var.get() and labor_amt > 0:
+                lbl_total.configure(text=f"Υλικά: {fmt(sub_mat)}   •   Εργασία: {fmt(labor_amt)}   •   ΦΠΑ {vr:g}%: {fmt(vat)}")
+            else:
+                lbl_total.configure(text=f"Αρχική αξία: {fmt(sub)}      ΦΠΑ {vr:g}%: {fmt(vat)}")
             lbl_big.configure(text=f"ΣΥΝΟΛΟ ΜΕ ΦΠΑ: {fmt(sub + vat)}")
             return sub, vr, vat, sub + vat
+
         e_vat.bind("<KeyRelease>", lambda e: refresh())
+        e_labor_amt.bind("<KeyRelease>", lambda e: refresh())
+
+        def apply_design_to_row(row, d):
+            row["code"] = d.get("code", "")
+            row["name"] = d.get("name", "")
+            row["category"] = d.get("category", "") or ""
+            row["series"] = d.get("series", "") or ""
+            row["color"] = d.get("color", "") or ""
+            row["descr"] = d.get("descr", "") or ""
+            row["image"] = d.get("image", "") or ""
+
+            if d.get("width"):
+                row["e_w"].delete(0, "end"); row["e_w"].insert(0, str(d["width"]))
+            if d.get("height"):
+                row["e_h"].delete(0, "end"); row["e_h"].insert(0, str(d["height"]))
+            if d.get("location"):
+                row["e_loc"].delete(0, "end"); row["e_loc"].insert(0, str(d["location"]))
+            if d.get("price"):
+                try:
+                    pr_val = float(d["price"])
+                    row["e_p"].delete(0, "end")
+                    row["e_p"].insert(0, str(int(pr_val) if pr_val == int(pr_val) else pr_val))
+                except Exception:
+                    pass
+
+            try:
+                _dm = d.get("materials_json", []) or []
+                row["materials"] = json.loads(_dm) if isinstance(_dm, str) else list(_dm)
+            except Exception:
+                row["materials"] = []
+
+            short_label = f"✔ {d.get('code','')} {d.get('name','')}".strip()
+            if len(short_label) > 30:
+                short_label = short_label[:29] + "…"
+            row["b_des"].configure(text=short_label, fg_color=GREEN, hover_color="#15803d")
+            refresh()
+
+            # Increment use_count
+            if d.get("id") or d.get("code"):
+                try:
+                    cc = db()
+                    if d.get("id"):
+                        cc.execute("UPDATE designs SET use_count = COALESCE(use_count, 0) + 1 WHERE id=?", (d["id"],))
+                    else:
+                        cc.execute("UPDATE designs SET use_count = COALESCE(use_count, 0) + 1 WHERE code=?", (d["code"],))
+                    cc.commit(); cc.close()
+                except Exception:
+                    pass
+
+        def quick_add(d):
+            target = None
+            if len(rows) == 1:
+                r0 = rows[0]
+                if r0["b_des"].cget("text") == "📐 Διάλεξε Σχέδιο..." and not r0["e_w"].get() and not r0["e_p"].get():
+                    target = r0
+            if not target:
+                target = add_row()
+            apply_design_to_row(target, d)
+            target["e_w"].focus_set()
+
+        if top_des:
+            for td in top_des:
+                tdd = dict(td)
+                cnt = tdd.get("use_count", 0) or 0
+                code = tdd.get("code", "")
+                raw_n = tdd.get("name", "")
+                name_short = (raw_n[:16] + "…") if len(raw_n) > 16 else raw_n
+                ser = tdd.get("series", "") or tdd.get("category", "")
+                ser_short = (ser[:14] + "…") if len(ser) > 14 else ser
+                btn_txt = f"{code} {name_short}\n★ {cnt}x  •  {ser_short}"
+                ctk.CTkButton(
+                    qbar, text=btn_txt, font=("Arial", 11, "bold"),
+                    height=44, fg_color="#1e293b", hover_color="#334155",
+                    corner_radius=8,
+                    command=lambda d=tdd: quick_add(d)
+                ).pack(side="left", padx=4, pady=2, fill="x", expand=True)
 
         def pick_design(row):
             win = ctk.CTkToplevel(self)
             win.title("📐 Κατάλογος Κουφωμάτων & Σχεδίων")
             win.geometry("820x620")
-            win.after(100, lambda: win.grab_set() if win.winfo_exists() else None)
+            self._popup_setup(win)
             
             top_bar = ctk.CTkFrame(win, fg_color="transparent")
             top_bar.pack(fill="x", padx=14, pady=(12, 6))
@@ -1338,36 +1650,7 @@ class App(ctk.CTk):
             picker_thumbs = []
 
             def choose(d):
-                row["code"] = d.get("code", "")
-                row["name"] = d.get("name", "")
-                row["category"] = d.get("category", "") or ""
-                row["series"] = d.get("series", "") or ""
-                row["color"] = d.get("color", "") or ""
-                row["descr"] = d.get("descr", "") or ""
-                row["image"] = d.get("image", "") or ""
-                
-                if d.get("width") and not row["e_w"].get().strip():
-                    row["e_w"].delete(0, "end"); row["e_w"].insert(0, str(d["width"]))
-                if d.get("height") and not row["e_h"].get().strip():
-                    row["e_h"].delete(0, "end"); row["e_h"].insert(0, str(d["height"]))
-                if d.get("location") and not row["e_loc"].get().strip():
-                    row["e_loc"].delete(0, "end"); row["e_loc"].insert(0, str(d["location"]))
-                if d.get("price") and not row["e_p"].get().strip():
-                    pr_val = float(d["price"])
-                    row["e_p"].delete(0, "end")
-                    row["e_p"].insert(0, str(int(pr_val) if pr_val == int(pr_val) else pr_val))
-                
-                try:
-                    _dm = d.get("materials_json", []) or []
-                    row["materials"] = json.loads(_dm) if isinstance(_dm, str) else list(_dm)
-                except Exception:
-                    row["materials"] = []
-
-                short_label = f"✔ {d.get('code','')} {d.get('name','')}".strip()
-                if len(short_label) > 30:
-                    short_label = short_label[:29] + "…"
-                row["b_des"].configure(text=short_label, fg_color=GREEN, hover_color="#15803d")
-                refresh()
+                apply_design_to_row(row, d)
                 win.destroy()
                 row["e_w"].focus_set()
 
@@ -1378,7 +1661,7 @@ class App(ctk.CTk):
                 q = fold_el(q.strip())
                 cat_filter = active_cat["v"]
                 c = db()
-                all_des = [dict(r) for r in c.execute("SELECT * FROM designs ORDER BY id ASC").fetchall()]
+                all_des = [dict(r) for r in c.execute("SELECT * FROM designs ORDER BY COALESCE(use_count, 0) DESC, id ASC").fetchall()]
                 c.close()
                 n = 0
                 for d in all_des:
@@ -1417,6 +1700,8 @@ class App(ctk.CTk):
                     sub = f"Σειρά: {d.get('series') or '—'}   •   Χρώμα: {d.get('color') or '—'}"
                     if d.get("width") and d.get("height"):
                         sub += f"   •   {d['width']}x{d['height']} εκ."
+                    if d.get("use_count", 0) > 0:
+                        sub += f"   •   ★ {d['use_count']} επιλογές"
                     ctk.CTkLabel(info, text=sub, font=("Arial", 11, "bold"), text_color=BLUEH, anchor="w").pack(fill="x", pady=(2, 2))
                     
                     specs_prev = " • ".join([line.strip() for line in (d.get("descr") or "").splitlines() if line.strip()][:2])
@@ -1456,7 +1741,7 @@ class App(ctk.CTk):
             win_ed = ctk.CTkToplevel(self)
             win_ed.title("⚙️ Προδιαγραφές & Υλικά Κουφώματος")
             win_ed.geometry("540x560")
-            win_ed.after(100, lambda: win_ed.grab_set() if win_ed.winfo_exists() else None)
+            self._popup_setup(win_ed)
             
             pnl = ctk.CTkScrollableFrame(win_ed, fg_color="white")
             pnl.pack(fill="both", expand=True, padx=12, pady=12)
@@ -1665,22 +1950,38 @@ class App(ctk.CTk):
                 "price": L["price"],
                 "materials": L.get("materials", [])
             } for L in lines if L.get("image") or (L.get("width") and L.get("height"))]
+            labor_amt = 0.0
+            if labor_var.get():
+                try:
+                    labor_amt = float((e_labor_amt.get() or "0").replace(",", "."))
+                except Exception:
+                    labor_amt = 0.0
+
             qobj = {"number": safe_quote_number(e_num.get().strip() or nxt), "date": datetime.now().strftime("%d/%m/%Y"),
                     "customer_id": cid, "customer_name": cname, "customer_info": cinfo,
                     "items_json": json.dumps(items, ensure_ascii=False),
                     "designs_json": json.dumps(qdesigns, ensure_ascii=False),
                     "subtotal": sub, "vat_rate": vr, "vat_amount": vat, "total": tot,
-                    "notes": e_notes.get("1.0", "end").strip()[:2000]}
+                    "notes": e_notes.get("1.0", "end").strip()[:2000],
+                    "include_labor": 1 if (labor_var.get() and labor_amt > 0) else 0,
+                    "labor_amount": labor_amt if labor_var.get() else 0.0,
+                    "labor_desc": e_labor_desc.get().strip() if labor_var.get() else ""}
             c.execute("""INSERT INTO quotes(number,date,customer_id,customer_name,customer_info,
-                       items_json,designs_json,subtotal,vat_rate,vat_amount,total,notes)
-                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       items_json,designs_json,subtotal,vat_rate,vat_amount,total,notes,
+                       include_labor,labor_amount,labor_desc)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                       (qobj["number"], qobj["date"], qobj["customer_id"], qobj["customer_name"],
                        qobj["customer_info"], qobj["items_json"], qobj["designs_json"],
-                       qobj["subtotal"], qobj["vat_rate"], qobj["vat_amount"], qobj["total"], qobj["notes"]))
+                       qobj["subtotal"], qobj["vat_rate"], qobj["vat_amount"], qobj["total"], qobj["notes"],
+                       qobj["include_labor"], qobj["labor_amount"], qobj["labor_desc"]))
+            for L in lines:
+                code_val = L.get("code")
+                if code_val:
+                    c.execute("UPDATE designs SET use_count = COALESCE(use_count, 0) + 1 WHERE code=?", (code_val,))
             c.commit(); c.close()
-            messagebox.showinfo("ΟΚ", f"Η προσφορά {qobj['number']} αποθηκεύτηκε!")
             path = os.path.join(PDF_DIR, f"Prosfora_{qobj['number']}.pdf")
-            make_pdf(qobj, path); open_path_safe(path)
+            make_pdf(qobj, path)
+            self.show_share_dialog(qobj, path)
             self.show("home")
         ctk.CTkButton(bot, text="💾 ΑΠΟΘΗΚΕΥΣΗ + PDF", font=("Arial", 16, "bold"),
                       height=52, fg_color=BLUEH, hover_color="#1e40af",
@@ -1835,7 +2136,7 @@ class App(ctk.CTk):
             c.close()
         win = ctk.CTkToplevel(self)
         win.title("Σχέδιο"); win.geometry("460x620")
-        win.after(100, lambda: win.grab_set() if win.winfo_exists() else None)
+        self._popup_setup(win)
         img_file = {"v": data.get("image", "")}
         prev = {"lbl": None}
 

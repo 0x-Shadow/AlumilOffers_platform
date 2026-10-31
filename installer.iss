@@ -1,8 +1,8 @@
 ; AluminaOffers — professional Windows installer (Inno Setup 6)
-; Build: iscc installer.iss   ->  Setup_AluminaOffers_1.2.0.exe
+; Build: iscc installer.iss   ->  Setup_AluminaOffers_1.2.1.exe
 
 #define MyAppName "AluminaOffers"
-#define MyAppVersion "1.2.0"
+#define MyAppVersion "1.2.1"
 #define MyAppPublisher "AluminaOffers"
 #define MyAppURL "https://github.com/0x-Shadow/AlumilOffers_platform"
 #define MyAppExeName "AluminaOffers.exe"
@@ -19,7 +19,7 @@ DefaultDirName={localappdata}\AluminaOffers
 DefaultGroupName={#MyAppName}
 PrivilegesRequired=lowest
 OutputDir=.
-OutputBaseFilename=Setup_AluminaOffers_1.2.0
+OutputBaseFilename=Setup_AluminaOffers_1.2.1
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
