@@ -4,6 +4,9 @@ logo.png
 Sxedia/
 PDF_Prosfores/
 
+# Source catalog scans (large, contain pricing)
+Offers/
+
 # PyInstaller build artifacts
 build/
 dist/
