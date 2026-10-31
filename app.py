@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-AluminaOffers v1.2.6 - Προσφορές Αλουμινάδων για Windows
+AluminaOffers v1.2.7 - Προσφορές Αλουμινάδων για Windows
 Dashboard | Νέα Προσφορά (μία οθόνη) | Κατάλογος | Στοιχεία+Λογότυπο | PDF με ΦΠΑ
 """
-__version__ = "1.2.6"
+__version__ = "1.2.7"
 import os, sqlite3, json, shutil, re, html, sys, subprocess, unicodedata, urllib.parse
 from datetime import datetime
 from tkinter import messagebox, filedialog
@@ -1455,6 +1455,7 @@ class App(ctk.CTk):
             ctk.CTkLabel(hdr, text=txt, font=("Arial", 12, "bold"), width=w, text_color=TXTG).pack(side="left", padx=3)
         rowsbox = ctk.CTkFrame(mid, fg_color=CARD); rowsbox.pack(fill="x", padx=14, pady=4)
         rows = []
+        active_row_ref = [None]  # Reference to currently active row for design picker
 
         # Πλαίσιο Εργασίας / Τοποθέτησης
         labor_box = ctk.CTkFrame(mid, fg_color="#f8fafc", corner_radius=10, border_width=1, border_color="#cbd5e1")
