@@ -3,7 +3,7 @@
 AluminaOffers v1.2.1 - Προσφορές Αλουμινάδων για Windows
 Dashboard | Νέα Προσφορά (μία οθόνη) | Κατάλογος | Στοιχεία+Λογότυπο | PDF με ΦΠΑ
 """
-__version__ = "1.2.1"
+__version__ = "1.2.2"
 import os, sqlite3, json, shutil, re, html, sys, subprocess, unicodedata, urllib.parse
 from datetime import datetime
 from tkinter import messagebox, filedialog
@@ -73,20 +73,29 @@ def open_folder_and_select(path):
         except Exception:
             pass
 
-def send_whatsapp(phone, message=""):
-    """Open WhatsApp Web with optional phone number and pre-filled text."""
-    clean_phone = re.sub(r"[^\d+]", "", phone or "")
-    if clean_phone.startswith("69") and len(clean_phone) == 10:
-        clean_phone = "+30" + clean_phone
-    elif clean_phone.startswith("0030"):
-        clean_phone = "+" + clean_phone[2:]
-    
-    encoded_msg = urllib.parse.quote(message) if message else ""
-    if clean_phone:
-        url = f"https://web.whatsapp.com/send?phone={clean_phone}&text={encoded_msg}"
-    else:
-        url = f"https://web.whatsapp.com/"
-    open_path_safe(url)
+def bind_scroll(widget, scrollable_frame, recursive=True):
+    """Ensure mouse wheel scrolling works reliably across platforms (Linux & Windows)."""
+    def _wheel(e):
+        try:
+            canvas = getattr(scrollable_frame, "_parent_canvas", None)
+            if canvas:
+                if sys.platform.startswith("win"):
+                    canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+                elif e.num == 4:
+                    canvas.yview_scroll(-2, "units")
+                elif e.num == 5:
+                    canvas.yview_scroll(2, "units")
+        except Exception:
+            pass
+    try:
+        widget.bind("<MouseWheel>", _wheel, add="+")
+        widget.bind("<Button-4>", _wheel, add="+")
+        widget.bind("<Button-5>", _wheel, add="+")
+        if recursive:
+            for child in widget.winfo_children():
+                bind_scroll(child, scrollable_frame, recursive=True)
+    except Exception:
+        pass
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -1047,7 +1056,9 @@ def make_pdf(q, filepath):
     if include_labor and labor_amt > 0:
         mat_cost = max(0.0, subtotal_val - labor_amt)
         totals.append([Paragraph("Κόστος Υλικών / Κουφωμάτων:", st_right), Paragraph(fmt(mat_cost), st_right)])
-        totals.append([Paragraph(f"<b>{esc(labor_desc)}:</b>", st_right), Paragraph(fmt(labor_amt), st_right)])
+        clean_lines = [esc(l.strip()) for l in labor_desc.splitlines() if l.strip()]
+        f_labor = "<br/>".join(clean_lines) if clean_lines else "Εργασία & Τοποθέτηση"
+        totals.append([Paragraph(f"<b>{f_labor}:</b>", st_right), Paragraph(fmt(labor_amt), st_right)])
         totals.append([Paragraph("<b>Καθαρή Αξία (χωρίς ΦΠΑ):</b>", st_right), Paragraph(fmt(subtotal_val), st_right)])
     else:
         totals.append([Paragraph("Αρχική Αξία (χωρίς ΦΠΑ):", st_right), Paragraph(fmt(subtotal_val), st_right)])
@@ -1294,13 +1305,11 @@ class App(ctk.CTk):
                 if ndes:
                     info += f"  •  {ndes} σχέδια"
                 ctk.CTkLabel(row, text=info, font=("Arial", 13), text_color=BLUEH).pack(side="left")
-                ctk.CTkButton(row, text="PDF", width=54, command=lambda qq=dict(r): self.open_pdf(qq)).pack(side="right", padx=2, pady=6)
-                ctk.CTkButton(row, text="📂", width=36, fg_color="#0284c7", hover_color="#0369a1",
-                              command=lambda qq=dict(r): self.open_quote_folder(qq)).pack(side="right", padx=2, pady=6)
-                ctk.CTkButton(row, text="💬", width=36, fg_color="#25D366", hover_color="#1ea952",
-                              command=lambda qq=dict(r): self.share_quote_dialog(qq)).pack(side="right", padx=2, pady=6)
+                ctk.CTkButton(row, text="PDF", width=64, command=lambda qq=dict(r): self.open_pdf(qq)).pack(side="right", padx=3, pady=6)
+                ctk.CTkButton(row, text="📁 Φάκελος", width=85, fg_color="#0284c7", hover_color="#0369a1",
+                              command=lambda qq=dict(r): self.open_quote_folder(qq)).pack(side="right", padx=3, pady=6)
                 ctk.CTkButton(row, text="✕", width=32, fg_color=RED,
-                              command=lambda i=r["id"]: self.del_quote(i)).pack(side="right", padx=2, pady=6)
+                              command=lambda i=r["id"]: self.del_quote(i)).pack(side="right", padx=3, pady=6)
             if n == 0:
                 ctk.CTkLabel(lst, text="Καμία προσφορά — πάτα «ΝΕΑ ΠΡΟΣΦΟΡΑ»!",
                              font=("Arial", 13), text_color=TXTG).pack(pady=24)
@@ -1315,7 +1324,8 @@ class App(ctk.CTk):
     def open_pdf(self, q):
         num = safe_quote_number(q['number'])
         path = os.path.join(PDF_DIR, f"Prosfora_{num}.pdf")
-        make_pdf(q, path)
+        if not os.path.exists(path):
+            make_pdf(q, path)
         open_path_safe(path)
 
     def open_quote_folder(self, q):
@@ -1324,93 +1334,6 @@ class App(ctk.CTk):
         if not os.path.exists(path):
             make_pdf(q, path)
         open_folder_and_select(path)
-
-    def share_quote_dialog(self, q):
-        num = safe_quote_number(q['number'])
-        path = os.path.join(PDF_DIR, f"Prosfora_{num}.pdf")
-        if not os.path.exists(path):
-            make_pdf(q, path)
-        self.show_share_dialog(q, path)
-
-    def show_share_dialog(self, qobj, pdf_path):
-        win = ctk.CTkToplevel(self)
-        win.title(f"🎉 Προσφορά {qobj.get('number', '')} Έτοιμη!")
-        win.geometry("540x440")
-        self._popup_setup(win)
-
-        card = ctk.CTkFrame(win, fg_color="white", corner_radius=12)
-        card.pack(fill="both", expand=True, padx=16, pady=16)
-
-        ctk.CTkLabel(card, text="✓ Η Προσφορά Αποθηκεύτηκε με Επιτυχία!",
-                     font=("Arial", 16, "bold"), text_color=GREEN).pack(pady=(14, 4))
-
-        info_box = ctk.CTkFrame(card, fg_color="#f8fafc", corner_radius=8)
-        info_box.pack(fill="x", padx=16, pady=6)
-
-        ctk.CTkLabel(info_box, text=f"Αριθμός: {qobj.get('number')}  •  Πελάτης: {qobj.get('customer_name')}",
-                     font=("Arial", 13, "bold"), text_color="#1e293b").pack(anchor="w", padx=12, pady=(6, 2))
-        ctk.CTkLabel(info_box, text=f"Τελικό Σύνολο με ΦΠΑ: {fmt(qobj.get('total', 0))}",
-                     font=("Arial", 14, "bold"), text_color=BLUEH).pack(anchor="w", padx=12, pady=(0, 6))
-
-        ctk.CTkLabel(card, text="Εύκολη Αποστολή & Πρόσβαση στο PDF:", font=("Arial", 12, "bold"),
-                     text_color="#64748b").pack(anchor="w", padx=16, pady=(8, 4))
-
-        btns = ctk.CTkFrame(card, fg_color="transparent")
-        btns.pack(fill="x", padx=16, pady=2)
-
-        ctk.CTkButton(
-            btns, text="📂 Άνοιγμα Φακέλου με το PDF\n(έτοιμο για drag & drop σε Viber / WhatsApp)",
-            font=("Arial", 13, "bold"), fg_color="#0284c7", hover_color="#0369a1",
-            height=46,
-            command=lambda: open_folder_and_select(pdf_path)
-        ).pack(fill="x", pady=4)
-
-        ctk.CTkButton(
-            btns, text="📄 Άνοιγμα & Προβολή PDF",
-            font=("Arial", 13), fg_color="#334155", hover_color="#1e293b",
-            height=36,
-            command=lambda: open_path_safe(pdf_path)
-        ).pack(fill="x", pady=3)
-
-        row_apps = ctk.CTkFrame(btns, fg_color="transparent")
-        row_apps.pack(fill="x", pady=3)
-
-        def open_wa():
-            cinfo = qobj.get("customer_info", "")
-            phone_match = re.search(r"(\+?\d[\d\s\-]{8,15})", cinfo)
-            phone = phone_match.group(1) if phone_match else ""
-            msg = f"Γεια σας, σας στέλνουμε την προσφορά Νο {qobj.get('number')} για τα κουφώματα. Σύνολο με ΦΠΑ: {fmt(qobj.get('total', 0))}."
-            send_whatsapp(phone, msg)
-
-        ctk.CTkButton(
-            row_apps, text="💬 WhatsApp Web",
-            font=("Arial", 12, "bold"), fg_color="#25D366", hover_color="#1ea952",
-            height=36,
-            command=open_wa
-        ).pack(side="left", fill="x", expand=True, padx=(0, 4))
-
-        def copy_path():
-            try:
-                self.clipboard_clear()
-                self.clipboard_append(os.path.abspath(pdf_path))
-                self.update()
-                lbl_tip.configure(text="✓ Αντιγράφηκε η διαδρομή! Κάντε επικόλληση (Ctrl+V) στο chat.")
-            except Exception as e:
-                lbl_tip.configure(text=f"Σφάλμα: {e}")
-
-        ctk.CTkButton(
-            row_apps, text="📋 Αντιγραφή Διαδρομής",
-            font=("Arial", 12), fg_color="#6d28d9", hover_color="#5b21b6",
-            height=36,
-            command=copy_path
-        ).pack(side="left", fill="x", expand=True, padx=(4, 0))
-
-        lbl_tip = ctk.CTkLabel(card, text="💡 Tip: Σύρετε το επιλεγμένο αρχείο από το φάκελο κατευθείαν στο Viber ή WhatsApp!",
-                               font=("Arial", 11), text_color="#64748b")
-        lbl_tip.pack(pady=6)
-
-        ctk.CTkButton(card, text="Κλείσιμο", font=("Arial", 12), fg_color="#94a3b8", hover_color="#64748b",
-                      height=30, command=win.destroy).pack(pady=(2, 6))
 
     # ---------- ΝΕΑ ΠΡΟΣΦΟΡΑ (μία οθόνη: γράψε -> PDF) ----------
     def page_new(self):
@@ -1425,23 +1348,24 @@ class App(ctk.CTk):
         except Exception:
             nxt = datetime.now().strftime("%Y%m%d%H%M")
 
-        wrap = ctk.CTkScrollableFrame(self.main, fg_color=BG, height=600)
+        wrap = ctk.CTkScrollableFrame(self.main, fg_color=BG)
         wrap.pack(fill="both", expand=True)
+        bind_scroll(wrap, wrap, recursive=False)
 
         top = self.card(wrap)
         f1 = ctk.CTkFrame(top, fg_color=CARD); f1.pack(fill="x", padx=14, pady=10)
         ctk.CTkLabel(f1, text="Νο:", font=("Arial", 13, "bold")).pack(side="left")
         e_num = ctk.CTkEntry(f1, width=80, font=("Arial", 14)); e_num.insert(0, nxt); e_num.pack(side="left", padx=6)
         ctk.CTkLabel(f1, text="Πελάτης:", font=("Arial", 13, "bold")).pack(side="left", padx=(10, 0))
-        # values=[] → το CTkComboBox επιστρέφει κυριολεκτικά το "CTkComboBox"
-        # και μπορεί να αποθηκευτεί ως όνομα πελάτη. Άρα πάντα τουλάχιστον [""].
-        cb_cust = ctk.CTkComboBox(f1, values=[x["name"] for x in custs] or [""], width=220, font=("Arial", 13))
+        cb_cust = ctk.CTkComboBox(f1, values=[x["name"] for x in custs] if custs else [""], width=230, font=("Arial", 13))
+        cb_cust.set("")
         cb_cust.pack(side="left", padx=6)
         e_phone = ctk.CTkEntry(f1, width=150, placeholder_text="Τηλέφωνο", font=("Arial", 13))
         e_phone.pack(side="left", padx=6)
 
         def on_cust(_):
-            r = next((dict(x) for x in custs if x["name"] == cb_cust.get()), None)
+            val = cb_cust.get().strip()
+            r = next((dict(x) for x in custs if x["name"] == val), None)
             if r:
                 e_phone.delete(0, "end"); e_phone.insert(0, r.get("phone", "") or "")
         cb_cust.configure(command=on_cust)
@@ -1461,10 +1385,10 @@ class App(ctk.CTk):
             qbox = self.card(wrap)
             qhdr = ctk.CTkFrame(qbox, fg_color="transparent")
             qhdr.pack(fill="x", padx=14, pady=(8, 2))
-            ctk.CTkLabel(qhdr, text="⚡ Δημοφιλή / Συχνά Κουφώματα (κλικ για άμεση προσθήκη):",
+            ctk.CTkLabel(qhdr, text="⚡ Δημοφιλή / Συχνά Κουφώματα (πατήστε εικόνα για άμεση προσθήκη):",
                          font=("Arial", 12, "bold"), text_color=TXTD).pack(side="left")
             qbar = ctk.CTkFrame(qbox, fg_color="transparent")
-            qbar.pack(fill="x", padx=10, pady=(0, 8))
+            qbar.pack(fill="x", padx=10, pady=(2, 10))
 
         mid = self.card(wrap)
         hdr = ctk.CTkFrame(mid, fg_color=CARD); hdr.pack(fill="x", padx=14, pady=(10, 0))
@@ -1475,36 +1399,44 @@ class App(ctk.CTk):
         rows = []
 
         # Πλαίσιο Εργασίας / Τοποθέτησης
-        labor_box = ctk.CTkFrame(mid, fg_color="#f1f5f9", corner_radius=8)
-        labor_box.pack(fill="x", padx=14, pady=(6, 6))
+        labor_box = ctk.CTkFrame(mid, fg_color="#f8fafc", corner_radius=10, border_width=1, border_color="#cbd5e1")
+        labor_box.pack(fill="x", padx=14, pady=(6, 8))
 
         labor_var = ctk.BooleanVar(value=False)
+
+        top_l = ctk.CTkFrame(labor_box, fg_color="transparent")
+        top_l.pack(fill="x", padx=12, pady=(10, 4))
 
         def toggle_labor():
             active = labor_var.get()
             if active:
                 e_labor_amt.configure(state="normal", fg_color="white")
-                e_labor_desc.configure(state="normal", fg_color="white")
+                txt_labor_desc.configure(state="normal", fg_color="white")
             else:
                 e_labor_amt.configure(state="disabled", fg_color="#e2e8f0")
-                e_labor_desc.configure(state="disabled", fg_color="#e2e8f0")
+                txt_labor_desc.configure(state="disabled", fg_color="#e2e8f0")
             refresh()
 
-        cb_labor = ctk.CTkCheckBox(labor_box, text="🛠️ Συμπερίληψη Κόστους Εργασίας / Τοποθέτησης",
-                                   font=("Arial", 12, "bold"), text_color=TXTD,
+        cb_labor = ctk.CTkCheckBox(top_l, text="🛠️ Συμπερίληψη Κόστους Εργασίας / Τοποθέτησης",
+                                   font=("Arial", 13, "bold"), text_color=TXTD,
                                    variable=labor_var, command=toggle_labor)
-        cb_labor.pack(side="left", padx=10, pady=8)
+        cb_labor.pack(side="left")
 
-        e_labor_desc = ctk.CTkEntry(labor_box, font=("Arial", 12), width=310)
-        e_labor_desc.insert(0, "Εργασία αποξήλωσης παλαιών & τοποθέτησης νέων κουφωμάτων")
-        e_labor_desc.configure(state="disabled", fg_color="#e2e8f0")
-        e_labor_desc.pack(side="left", padx=6, pady=8)
-
-        ctk.CTkLabel(labor_box, text="Ποσό €:", font=("Arial", 12, "bold"), text_color=TXTD).pack(side="left", padx=(6, 2))
-        e_labor_amt = ctk.CTkEntry(labor_box, width=80, font=("Arial", 13, "bold"), placeholder_text="0")
+        ctk.CTkLabel(top_l, text="Ποσό Εργασίας €:", font=("Arial", 13, "bold"), text_color=TXTD).pack(side="right", padx=(0, 4))
+        e_labor_amt = ctk.CTkEntry(top_l, width=105, font=("Arial", 14, "bold"), placeholder_text="0")
         e_labor_amt.insert(0, "0")
         e_labor_amt.configure(state="disabled", fg_color="#e2e8f0")
-        e_labor_amt.pack(side="left", padx=4, pady=8)
+        e_labor_amt.pack(side="right", padx=(0, 6))
+
+        desc_l = ctk.CTkFrame(labor_box, fg_color="transparent")
+        desc_l.pack(fill="x", padx=12, pady=(2, 10))
+
+        ctk.CTkLabel(desc_l, text="Αναλυτική Περιγραφή Εργασιών (μπορείτε να γράψετε όσο αναλυτικά θέλετε):",
+                     font=("Arial", 11, "bold"), text_color="#64748b").pack(anchor="w", pady=(0, 4))
+        txt_labor_desc = ctk.CTkTextbox(desc_l, height=72, font=("Arial", 12))
+        txt_labor_desc.insert("1.0", "Εργασία αποξήλωσης παλαιών κουφωμάτων & τοποθέτησης νέων")
+        txt_labor_desc.configure(state="disabled", fg_color="#e2e8f0")
+        txt_labor_desc.pack(fill="x")
 
         lbl_total = ctk.CTkLabel(mid, text="", font=("Arial", 13), text_color="#334155", justify="right")
         lbl_total.pack(anchor="e", padx=18)
@@ -1619,11 +1551,25 @@ class App(ctk.CTk):
                 name_short = (raw_n[:16] + "…") if len(raw_n) > 16 else raw_n
                 ser = tdd.get("series", "") or tdd.get("category", "")
                 ser_short = (ser[:14] + "…") if len(ser) > 14 else ser
-                btn_txt = f"{code} {name_short}\n★ {cnt}x  •  {ser_short}"
+                btn_txt = f" {code} {name_short}\n ★ {cnt}x  •  {ser_short}"
+
+                pth = img_path(tdd.get("image"))
+                ph = None
+                if pth and os.path.exists(pth):
+                    try:
+                        with PILImage.open(pth) as im:
+                            w0, h0 = im.size
+                        s = min(64 / w0, 50 / h0)
+                        ph = ctk.CTkImage(light_image=PILImage.open(pth), size=(max(24, int(w0 * s)), max(24, int(h0 * s))))
+                        self._thumbs.append(ph)
+                    except Exception:
+                        ph = None
+
                 ctk.CTkButton(
-                    qbar, text=btn_txt, font=("Arial", 11, "bold"),
-                    height=44, fg_color="#1e293b", hover_color="#334155",
-                    corner_radius=8,
+                    qbar, text=btn_txt, image=ph, compound="left",
+                    font=("Arial", 11, "bold"),
+                    height=56, fg_color="#1e293b", hover_color="#334155",
+                    corner_radius=10, anchor="w",
                     command=lambda d=tdd: quick_add(d)
                 ).pack(side="left", padx=4, pady=2, fill="x", expand=True)
 
@@ -1957,6 +1903,8 @@ class App(ctk.CTk):
                 except Exception:
                     labor_amt = 0.0
 
+            labor_desc_val = txt_labor_desc.get("1.0", "end").strip() if labor_var.get() else ""
+
             qobj = {"number": safe_quote_number(e_num.get().strip() or nxt), "date": datetime.now().strftime("%d/%m/%Y"),
                     "customer_id": cid, "customer_name": cname, "customer_info": cinfo,
                     "items_json": json.dumps(items, ensure_ascii=False),
@@ -1965,7 +1913,7 @@ class App(ctk.CTk):
                     "notes": e_notes.get("1.0", "end").strip()[:2000],
                     "include_labor": 1 if (labor_var.get() and labor_amt > 0) else 0,
                     "labor_amount": labor_amt if labor_var.get() else 0.0,
-                    "labor_desc": e_labor_desc.get().strip() if labor_var.get() else ""}
+                    "labor_desc": labor_desc_val}
             c.execute("""INSERT INTO quotes(number,date,customer_id,customer_name,customer_info,
                        items_json,designs_json,subtotal,vat_rate,vat_amount,total,notes,
                        include_labor,labor_amount,labor_desc)
@@ -1978,19 +1926,32 @@ class App(ctk.CTk):
                 code_val = L.get("code")
                 if code_val:
                     c.execute("UPDATE designs SET use_count = COALESCE(use_count, 0) + 1 WHERE code=?", (code_val,))
+                # Auto-save new materials into the materials table
+                m_name = (L.get("base") or L.get("name") or "").strip()
+                if m_name and m_name != "Κούφωμα" and not m_name.startswith("📐"):
+                    exists = c.execute("SELECT 1 FROM materials WHERE LOWER(name)=?", (m_name.lower(),)).fetchone()
+                    if not exists:
+                        unit = L.get("unit") or "τεμ."
+                        pr = float(L.get("price") or 0)
+                        c.execute("INSERT INTO materials(name, unit, price) VALUES(?,?,?)", (m_name, unit, pr))
+
             c.commit(); c.close()
             path = os.path.join(PDF_DIR, f"Prosfora_{qobj['number']}.pdf")
             make_pdf(qobj, path)
-            self.show_share_dialog(qobj, path)
+            open_path_safe(path)
+            open_folder_and_select(path)
             self.show("home")
         ctk.CTkButton(bot, text="💾 ΑΠΟΘΗΚΕΥΣΗ + PDF", font=("Arial", 16, "bold"),
                       height=52, fg_color=BLUEH, hover_color="#1e40af",
                       command=save).pack(padx=16, pady=12, fill="x")
+        bind_scroll(wrap, wrap, recursive=True)
 
     # ---------- ΚΑΤΑΛΟΓΟΣ (Σχέδια | Υλικά | Πελάτες) ----------
     def page_catalog(self):
         self.section(self.main, "Κατάλογος", "σχέδια • υλικά • πελάτες σε ένα μέρος")
-        box = self.card(self.main)
+        box = ctk.CTkFrame(self.main, fg_color=CARD, corner_radius=16,
+                           border_width=1, border_color="#e2e8f0")
+        box.pack(fill="both", expand=True, padx=18, pady=(4, 12))
         seg = ctk.CTkSegmentedButton(box, values=["Σχέδια", "Υλικά", "Πελάτες"],
                                      font=("Arial", 14, "bold"), height=40,
                                      selected_color=BLUEH,
@@ -2025,14 +1986,18 @@ class App(ctk.CTk):
                 load()
         ctk.CTkButton(bar, text="⭐ Πρότυπα Alumil", fg_color="#0284c7",
                       command=reload_presets).pack(side="left", padx=4)
-        grid = ctk.CTkScrollableFrame(box, fg_color=CARD, height=430)
+        grid = ctk.CTkScrollableFrame(box, fg_color=CARD)
         grid.pack(fill="both", expand=True, padx=8, pady=8)
+        grid.grid_columnconfigure(0, weight=1)
+        grid.grid_columnconfigure(1, weight=1)
+        grid.grid_columnconfigure(2, weight=1)
+        bind_scroll(grid, grid, recursive=False)
 
         def load(*_):
             for w in grid.winfo_children():
                 w.destroy()
             self._thumbs = []
-            q = e_search.get().strip().lower()
+            q = fold_el(e_search.get().strip())
             cat = cb_cat.get()
             c = db()
             rows = c.execute("SELECT * FROM designs ORDER BY code").fetchall()
@@ -2041,11 +2006,12 @@ class App(ctk.CTk):
             for r in rows:
                 if cat != "Όλες" and r["category"] != cat:
                     continue
-                if q and q not in ((r["code"] or "") + " " + (r["name"] or "")).lower():
+                blob = fold_el(" ".join([r["code"] or "", r["name"] or "", r["series"] or "", r["category"] or ""]))
+                if q and q not in blob:
                     continue
-                n += 1
                 card = ctk.CTkFrame(grid, fg_color=ROWB, corner_radius=12)
-                card.pack(side="left", padx=8, pady=8)
+                card.grid(row=n // 3, column=n % 3, padx=8, pady=8, sticky="nsew")
+                n += 1
                 pth = img_path(r["image"])
                 if pth:
                     try:
@@ -2070,9 +2036,10 @@ class App(ctk.CTk):
                               command=lambda i=r["id"]: self.design_dialog(i)).pack(side="left", padx=3)
                 ctk.CTkButton(btns, text="✕", width=36, fg_color=RED,
                               command=lambda i=r["id"]: self.del_design(i, load)).pack(side="left", padx=3)
+                bind_scroll(card, grid, recursive=True)
             if n == 0:
                 ctk.CTkLabel(grid, text="Κανένα σχέδιο.\nΠάτα «Νέο σχέδιο» ή «Εισαγωγή φακέλου».",
-                             font=("Arial", 14), text_color=TXTG, justify="center").pack(pady=40)
+                             font=("Arial", 14), text_color=TXTG, justify="center").grid(row=0, column=0, columnspan=3, pady=40)
         e_search.bind("<KeyRelease>", load)
         cb_cat.configure(command=load)
         load()
@@ -2255,29 +2222,71 @@ class App(ctk.CTk):
                       height=44, fg_color=BLUEH, command=save).pack(pady=10, fill="x")
 
     def render_materials(self, box):
-        fr = ctk.CTkFrame(box, fg_color=CARD); fr.pack(fill="x", padx=14, pady=10)
-        e_n = ctk.CTkEntry(fr, width=300, placeholder_text="Όνομα υλικού π.χ. Συρόμενο τ.μ.", font=("Arial", 13)); e_n.pack(side="left", padx=4)
-        e_u = ctk.CTkComboBox(fr, values=["τ.μ.", "τεμ.", "μέτρο", "ώρες"], width=100, font=("Arial", 13)); e_u.pack(side="left", padx=4)
-        e_p = ctk.CTkEntry(fr, width=110, placeholder_text="Τιμή €", font=("Arial", 13)); e_p.pack(side="left", padx=4)
-        lst = ctk.CTkScrollableFrame(box, fg_color=CARD, height=420); lst.pack(fill="both", expand=True, padx=8, pady=8)
+        bar = ctk.CTkFrame(box, fg_color=CARD); bar.pack(fill="x", padx=14, pady=(8, 4))
+        e_search = ctk.CTkEntry(bar, width=280, placeholder_text="🔍 Αναζήτηση υλικού...", font=("Arial", 13))
+        e_search.pack(side="left", padx=4)
+
+        fr = ctk.CTkFrame(box, fg_color=CARD); fr.pack(fill="x", padx=14, pady=(4, 8))
+        e_n = ctk.CTkEntry(fr, width=280, placeholder_text="Όνομα νέου υλικού π.χ. Σίτα Plisse", font=("Arial", 13)); e_n.pack(side="left", padx=4)
+        e_u = ctk.CTkComboBox(fr, values=["τεμ.", "τ.μ.", "μέτρο", "ώρες", "κιλό", "σετ"], width=90, font=("Arial", 13)); e_u.pack(side="left", padx=4)
+        e_p = ctk.CTkEntry(fr, width=90, placeholder_text="Τιμή €", font=("Arial", 13)); e_p.pack(side="left", padx=4)
+        
+        lst = ctk.CTkScrollableFrame(box, fg_color=CARD)
+        lst.pack(fill="both", expand=True, padx=8, pady=8)
+        bind_scroll(lst, lst, recursive=False)
+
+        def edit_mat_dialog(i, curr_n, curr_u, curr_p):
+            d = ctk.CTkToplevel(self)
+            d.title("Επεξεργασία Υλικού"); d.geometry("380x250")
+            self._popup_setup(d)
+            f = ctk.CTkFrame(d, fg_color="white", corner_radius=10); f.pack(fill="both", expand=True, padx=14, pady=14)
+            ctk.CTkLabel(f, text="Όνομα Υλικού:", font=("Arial", 12, "bold")).pack(anchor="w", pady=(4, 2))
+            en = ctk.CTkEntry(f, width=320, font=("Arial", 13)); en.insert(0, curr_n or ""); en.pack(fill="x", pady=(0, 8))
+            ctk.CTkLabel(f, text="Μονάδα:", font=("Arial", 12, "bold")).pack(anchor="w", pady=(2, 2))
+            eu = ctk.CTkComboBox(f, values=["τεμ.", "τ.μ.", "μέτρο", "ώρες", "κιλό", "σετ"], width=320, font=("Arial", 13))
+            eu.set(curr_u or "τεμ."); eu.pack(fill="x", pady=(0, 8))
+            ctk.CTkLabel(f, text="Τιμή €:", font=("Arial", 12, "bold")).pack(anchor="w", pady=(2, 2))
+            ep = ctk.CTkEntry(f, width=320, font=("Arial", 13)); ep.insert(0, str(curr_p or "0")); ep.pack(fill="x", pady=(0, 12))
+            def do_save():
+                nm = en.get().strip()
+                if not nm:
+                    return messagebox.showwarning("Προσοχή", "Βάλε όνομα υλικού")
+                try:
+                    pr = float(ep.get().replace(",", "."))
+                except Exception:
+                    return messagebox.showwarning("Προσοχή", "Βάλε έγκυρη τιμή")
+                c = db(); c.execute("UPDATE materials SET name=?, unit=?, price=? WHERE id=?", (nm, eu.get(), pr, i))
+                c.commit(); c.close()
+                d.destroy(); load()
+            ctk.CTkButton(f, text="💾 Αποθήκευση", font=("Arial", 13, "bold"), fg_color=BLUEH, command=do_save).pack(fill="x")
 
         def delete_mat(i):
             if messagebox.askyesno("Σίγουρα;", "Διαγραφή υλικού;"):
                 c = db(); c.execute("DELETE FROM materials WHERE id=?", (i,)); c.commit(); c.close()
                 load()
 
-        def load():
+        def load(*_):
             for w in lst.winfo_children():
                 w.destroy()
+            q = fold_el(e_search.get().strip())
             c = db(); rows = c.execute("SELECT * FROM materials ORDER BY name").fetchall(); c.close()
+            n = 0
             for r in rows:
+                if q and q not in fold_el(r["name"] or ""):
+                    continue
+                n += 1
                 row = ctk.CTkFrame(lst, fg_color=ROWB, corner_radius=10); row.pack(fill="x", pady=4)
                 ctk.CTkLabel(row, text=f"{r['name']}", font=("Arial", 14, "bold"),
-                             text_color=TXTD).pack(side="left", padx=12)
+                             text_color=TXTD).pack(side="left", padx=12, pady=8)
                 ctk.CTkLabel(row, text=f"{fmt(r['price'])} / {r['unit']}", font=("Arial", 13),
                              text_color=BLUEH).pack(side="left", padx=8)
-                ctk.CTkButton(row, text="Διαγραφή", width=90, fg_color=RED,
+                ctk.CTkButton(row, text="✕", width=36, fg_color=RED,
                               command=lambda i=r["id"]: delete_mat(i)).pack(side="right", padx=6, pady=6)
+                ctk.CTkButton(row, text="Επεξεργασία", width=100,
+                              command=lambda i=r["id"], nm=r["name"], un=r["unit"], pr=r["price"]: edit_mat_dialog(i, nm, un, pr)).pack(side="right", padx=4, pady=6)
+                bind_scroll(row, lst, recursive=True)
+            if n == 0:
+                ctk.CTkLabel(lst, text="Δεν βρέθηκαν υλικά.", font=("Arial", 13), text_color=TXTG).pack(pady=30)
 
         def add():
             try:
@@ -2290,31 +2299,78 @@ class App(ctk.CTk):
                                 (e_n.get().strip(), e_u.get(), pr)); c.commit(); c.close()
             e_n.delete(0, "end"); e_p.delete(0, "end"); load()
         ctk.CTkButton(fr, text="＋ Προσθήκη", font=("Arial", 13, "bold"), command=add).pack(side="left", padx=6)
+        e_search.bind("<KeyRelease>", load)
         load()
 
     def render_customers(self, box):
-        fr = ctk.CTkFrame(box, fg_color=CARD); fr.pack(fill="x", padx=14, pady=10)
-        e1 = ctk.CTkEntry(fr, width=200, placeholder_text="Ονοματεπώνυμο *", font=("Arial", 13)); e1.pack(side="left", padx=4)
+        bar = ctk.CTkFrame(box, fg_color=CARD); bar.pack(fill="x", padx=14, pady=(8, 4))
+        e_search = ctk.CTkEntry(bar, width=280, placeholder_text="🔍 Αναζήτηση πελάτη (όνομα / τηλ)...", font=("Arial", 13))
+        e_search.pack(side="left", padx=4)
+
+        fr = ctk.CTkFrame(box, fg_color=CARD); fr.pack(fill="x", padx=14, pady=(4, 8))
+        e1 = ctk.CTkEntry(fr, width=180, placeholder_text="Ονοματεπώνυμο *", font=("Arial", 13)); e1.pack(side="left", padx=4)
         e2 = ctk.CTkEntry(fr, width=120, placeholder_text="Τηλέφωνο", font=("Arial", 13)); e2.pack(side="left", padx=4)
-        e3 = ctk.CTkEntry(fr, width=170, placeholder_text="Email", font=("Arial", 13)); e3.pack(side="left", padx=4)
-        e4 = ctk.CTkEntry(fr, width=180, placeholder_text="Διεύθυνση", font=("Arial", 13)); e4.pack(side="left", padx=4)
-        lst = ctk.CTkScrollableFrame(box, fg_color=CARD, height=420); lst.pack(fill="both", expand=True, padx=8, pady=8)
+        e3 = ctk.CTkEntry(fr, width=150, placeholder_text="Email", font=("Arial", 13)); e3.pack(side="left", padx=4)
+        e4 = ctk.CTkEntry(fr, width=160, placeholder_text="Διεύθυνση", font=("Arial", 13)); e4.pack(side="left", padx=4)
+        lst = ctk.CTkScrollableFrame(box, fg_color=CARD); lst.pack(fill="both", expand=True, padx=8, pady=8)
+        bind_scroll(lst, lst, recursive=False)
+
+        def edit_cust_dialog(i, cdata):
+            d = ctk.CTkToplevel(self)
+            d.title("Επεξεργασία Πελάτη"); d.geometry("400x320")
+            self._popup_setup(d)
+            f = ctk.CTkFrame(d, fg_color="white", corner_radius=10); f.pack(fill="both", expand=True, padx=14, pady=14)
+            ctk.CTkLabel(f, text="Ονοματεπώνυμο *:", font=("Arial", 12, "bold")).pack(anchor="w", pady=(2, 2))
+            ce1 = ctk.CTkEntry(f, width=340, font=("Arial", 13)); ce1.insert(0, cdata.get("name","") or ""); ce1.pack(fill="x", pady=(0, 6))
+            ctk.CTkLabel(f, text="Τηλέφωνο:", font=("Arial", 12, "bold")).pack(anchor="w", pady=(2, 2))
+            ce2 = ctk.CTkEntry(f, width=340, font=("Arial", 13)); ce2.insert(0, cdata.get("phone","") or ""); ce2.pack(fill="x", pady=(0, 6))
+            ctk.CTkLabel(f, text="Email:", font=("Arial", 12, "bold")).pack(anchor="w", pady=(2, 2))
+            ce3 = ctk.CTkEntry(f, width=340, font=("Arial", 13)); ce3.insert(0, cdata.get("email","") or ""); ce3.pack(fill="x", pady=(0, 6))
+            ctk.CTkLabel(f, text="Διεύθυνση:", font=("Arial", 12, "bold")).pack(anchor="w", pady=(2, 2))
+            ce4 = ctk.CTkEntry(f, width=340, font=("Arial", 13)); ce4.insert(0, cdata.get("address","") or ""); ce4.pack(fill="x", pady=(0, 10))
+            def do_save():
+                nm = ce1.get().strip()
+                if not nm:
+                    return messagebox.showwarning("Προσοχή", "Βάλε όνομα πελάτη")
+                c = db(); c.execute("UPDATE customers SET name=?, phone=?, email=?, address=? WHERE id=?",
+                                    (nm, ce2.get().strip(), ce3.get().strip(), ce4.get().strip(), i))
+                c.commit(); c.close()
+                d.destroy(); load()
+            ctk.CTkButton(f, text="💾 Αποθήκευση", font=("Arial", 13, "bold"), fg_color=BLUEH, command=do_save).pack(fill="x")
 
         def delete_cust(i):
             if messagebox.askyesno("Σίγουρα;", "Διαγραφή πελάτη;"):
                 c = db(); c.execute("DELETE FROM customers WHERE id=?", (i,)); c.commit(); c.close()
                 load()
 
-        def load():
+        def load(*_):
             for w in lst.winfo_children():
                 w.destroy()
+            q = fold_el(e_search.get().strip())
             c = db(); rows = c.execute("SELECT * FROM customers ORDER BY name").fetchall(); c.close()
+            n = 0
             for r in rows:
+                blob = fold_el(" ".join([r["name"] or "", r["phone"] or "", r["email"] or "", r["address"] or ""]))
+                if q and q not in blob:
+                    continue
+                n += 1
                 row = ctk.CTkFrame(lst, fg_color=ROWB, corner_radius=10); row.pack(fill="x", pady=4)
-                ctk.CTkLabel(row, text=f"{r['name']}  •  {r['phone']}  •  {r['email']}",
+                info_text = f"{r['name']}"
+                if r['phone']:
+                    info_text += f"  •  📞 {r['phone']}"
+                if r['email']:
+                    info_text += f"  •  ✉️ {r['email']}"
+                if r['address']:
+                    info_text += f"  •  📍 {r['address']}"
+                ctk.CTkLabel(row, text=info_text,
                              font=("Arial", 13, "bold"), text_color=TXTD).pack(side="left", padx=12, pady=8)
-                ctk.CTkButton(row, text="Διαγραφή", width=90, fg_color=RED,
+                ctk.CTkButton(row, text="✕", width=36, fg_color=RED,
                               command=lambda i=r["id"]: delete_cust(i)).pack(side="right", padx=6)
+                ctk.CTkButton(row, text="Επεξεργασία", width=100,
+                              command=lambda i=r["id"], cd=dict(r): edit_cust_dialog(i, cd)).pack(side="right", padx=4)
+                bind_scroll(row, lst, recursive=True)
+            if n == 0:
+                ctk.CTkLabel(lst, text="Δεν βρέθηκαν πελάτες.", font=("Arial", 13), text_color=TXTG).pack(pady=30)
 
         def add():
             if not e1.get().strip():
@@ -2325,6 +2381,7 @@ class App(ctk.CTk):
                 e.delete(0, "end")
             load()
         ctk.CTkButton(fr, text="＋ Προσθήκη", font=("Arial", 13, "bold"), command=add).pack(side="left", padx=6)
+        e_search.bind("<KeyRelease>", load)
         load()
 
     # ---------- ΣΤΟΙΧΕΙΑ & ΛΟΓΟΤΥΠΟ ----------
