@@ -16,14 +16,16 @@ no dependencies (publish it with GitHub Pages: Settings → Pages → `main` →
 - **Visual Design Picker (v1.2.0)** — quick-select from preset Alumil & Europa designs
   with CAD-style technical drawings, instant search (Greek accent-insensitive), and category filters.
 - **New quote on one screen** — customizable lines (Design | Width | Height | Location |
-  Qty | Price), live totals, duplicate row (📋), detailed specs editor (⚙️), one big Save+PDF button.
+  Qty | Price), live totals, a product-only offer discount (labor excluded) with automatic VAT recalculation,
+  duplicate row (📋), detailed specs editor (⚙️), one big Save+PDF button.
 - **Designs catalog** — code, name, category, dimensions, photo, series, RAL color, per-design
   bill of materials; built-in Alumil/Europa presets generator.
 - **Materials & customers** — simple lists, auto-registration from quotes.
 - **Company profile + logo** — shown in the app and embedded in every PDF.
 - **Professional PDF (Reference Layout)** — logo, company info, CAD schematic elevations
   (sliding, casement opening triangles, roller shutter hatching, flyscreens), series / color / dimensions
-  table, multi-line itemized specifications, net value / VAT / total with VAT, footer on every page.
+  table, a priced offer summary with discount / net value / VAT / total with VAT, detailed model
+  illustrations and specifications without repeated prices, footer on every page.
 - **100% local** — SQLite database next to the app, no cloud, no accounts.
 
 ## Requirements
