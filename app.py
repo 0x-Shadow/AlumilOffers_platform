@@ -3,8 +3,8 @@
 AluminaOffers v1.2.7 - Προσφορές Αλουμινάδων για Windows
 Dashboard | Νέα Προσφορά (μία οθόνη) | Κατάλογος | Στοιχεία+Λογότυπο | PDF με ΦΠΑ
 """
-__version__ = "1.3.0"
-import os, sqlite3, json, shutil, re, html, sys, subprocess, unicodedata, urllib.parse
+__version__ = "1.3.1"
+import os, sqlite3, json, shutil, re, html, sys, subprocess, unicodedata, urllib.parse, math
 from datetime import datetime
 from tkinter import messagebox, filedialog
 import customtkinter as ctk
@@ -26,6 +26,34 @@ def safe_quote_number(s, fallback="prosfora"):
     if s in (".", ".."):
         return fallback
     return s
+
+def quote_pdf_filename(q):
+    client = safe_quote_number(q.get("customer_name"), fallback="pelatis")
+    number = safe_quote_number(q.get("number"))
+    return f"{client}_{number}.pdf"
+
+def parse_discount_percent(value):
+    try:
+        percent = float(str(value or "0").strip().replace(",", "."))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Το ποσοστό προσφοράς πρέπει να είναι αριθμός από 0 έως 100.") from exc
+    if not math.isfinite(percent) or not 0 <= percent <= 100:
+        raise ValueError("Το ποσοστό προσφοράς πρέπει να είναι από 0 έως 100.")
+    return percent
+
+def calculate_quote_totals(product_total, labor_amount, discount_percent, vat_rate):
+    product_total = float(product_total)
+    labor_amount = float(labor_amount)
+    vat_rate = float(vat_rate)
+    discount_percent = parse_discount_percent(discount_percent)
+    if not all(math.isfinite(value) and value >= 0 for value in (product_total, labor_amount)):
+        raise ValueError("Οι αξίες προϊόντων και εργασίας πρέπει να είναι έγκυροι θετικοί αριθμοί.")
+    if not math.isfinite(vat_rate) or not 0 <= vat_rate <= 100:
+        raise ValueError("Ο συντελεστής ΦΠΑ πρέπει να είναι από 0 έως 100.")
+    discount_amount = product_total * discount_percent / 100
+    subtotal = product_total - discount_amount + labor_amount
+    vat_amount = subtotal * vat_rate / 100
+    return discount_amount, subtotal, vat_amount, subtotal + vat_amount
 
 def safe_img_name(name):
     """Containment: IMG_DIR/basename only, no traversal, no absolute escape."""
@@ -336,6 +364,8 @@ def init_db():
         c.execute("ALTER TABLE quotes ADD COLUMN labor_amount REAL DEFAULT 0.0")
     if "labor_desc" not in cols:
         c.execute("ALTER TABLE quotes ADD COLUMN labor_desc TEXT DEFAULT ''")
+    if "discount_percent" not in cols:
+        c.execute("ALTER TABLE quotes ADD COLUMN discount_percent REAL DEFAULT 0")
     c.execute("""CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT)""")
     if not c.execute("SELECT 1 FROM settings WHERE key='company'").fetchone():
         c.execute("INSERT INTO settings VALUES('company', ?)", (json.dumps({
@@ -807,16 +837,16 @@ class Schematic(Flowable):
         top_y = y0 + ih + (self.shutter_h if f["shutter"] else 0) + 2.2*mm
         if top_y + 3*mm < self.BOX_H:
             c.line(x0, top_y, x0 + iw, top_y)
-            for xx in (x0, x0 + iw):
-                c.line(xx, top_y - 0.9*mm, xx, top_y + 0.9*mm)
-            c.setFont(FONT, 6.5)
+            self._dimension_arrow(c, x0, top_y, "R")
+            self._dimension_arrow(c, x0 + iw, top_y, "L")
+            c.setFont(FONT, 7)
             c.drawCentredString(x0 + iw / 2.0, top_y + 1.2*mm, self.w_txt)
         lx = x0 - 2.3*mm
         c.line(lx, y0, lx, y0 + ih)
-        for yy in (y0, y0 + ih):
-            c.line(lx - 0.9*mm, yy, lx + 0.9*mm, yy)
+        self._dimension_arrow(c, lx, y0, "U")
+        self._dimension_arrow(c, lx, y0 + ih, "D")
         c.saveState()
-        c.setFont(FONT, 6.5)
+        c.setFont(FONT, 7)
         c.translate(lx - 1.5*mm, y0 + ih / 2.0)
         c.rotate(90)
         c.drawCentredString(0, 0, self.h_txt)
@@ -827,9 +857,32 @@ class Schematic(Flowable):
             cap = f"Τοποθέτηση: {cap}"
         else:
             cap = self.label
-        c.setFont(FONT, 6.5)
+        c.setFont(FONT, 7)
         c.setFillColor(CAPTIONC)
         c.drawCentredString(self.BOX_W / 2.0, 1.6*mm, cap[:42])
+
+    @staticmethod
+    def _dimension_arrow(c, x, y, direction):
+        size = 1.0*mm
+        path = c.beginPath()
+        if direction == "R":
+            path.moveTo(x, y)
+            path.lineTo(x + size, y + size * 0.55)
+            path.lineTo(x + size, y - size * 0.55)
+        elif direction == "L":
+            path.moveTo(x, y)
+            path.lineTo(x - size, y + size * 0.55)
+            path.lineTo(x - size, y - size * 0.55)
+        elif direction == "U":
+            path.moveTo(x, y)
+            path.lineTo(x - size * 0.55, y + size)
+            path.lineTo(x + size * 0.55, y + size)
+        else:
+            path.moveTo(x, y)
+            path.lineTo(x - size * 0.55, y - size)
+            path.lineTo(x + size * 0.55, y - size)
+        path.close()
+        c.drawPath(path, fill=1, stroke=0)
 
 class ScaledFlowable(Flowable):
     """Draw another flowable scaled down to fit a maximum box (PDF thumbnails)."""
@@ -992,17 +1045,10 @@ def make_pdf(q, filepath):
     st_n = ParagraphStyle('n', fontName=FONT, fontSize=9.5, textColor=DARK, leading=13)
     st_small = ParagraphStyle('s', fontName=FONT, fontSize=8.5, textColor=colors.grey, leading=11)
     st_cell = ParagraphStyle('c', fontName=FONT, fontSize=9, leading=12)
-    st_cell_small = ParagraphStyle('cs', fontName=FONT, fontSize=7.5, leading=10, textColor=DARK)
     st_cellb = ParagraphStyle('cb', fontName=FONTB, fontSize=9, leading=12)
     st_cellh = ParagraphStyle('ch', fontName=FONTB, fontSize=9, leading=12, textColor=colors.white)
-    st_right = ParagraphStyle('r', fontName=FONT, fontSize=10, leading=14, alignment=2)
-    st_total = ParagraphStyle('rt', fontName=FONTB, fontSize=13, leading=16, alignment=2, textColor=colors.white)
-    st_d = ParagraphStyle('d', fontName=FONT, fontSize=9, leading=12, textColor=DARK)
     st_cardh = ParagraphStyle('cardh', fontName=FONTB, fontSize=9, leading=12, textColor=colors.white)
-    st_th2 = ParagraphStyle('th2', fontName=FONTB, fontSize=7.5, leading=10, textColor=colors.HexColor("#334155"))
-    st_td2 = ParagraphStyle('td2', fontName=FONT, fontSize=8, leading=11, textColor=DARK)
     st_spec = ParagraphStyle('spec', fontName=FONT, fontSize=7.5, leading=10, textColor=colors.HexColor("#1e293b"))
-    st_price = ParagraphStyle('pr', fontName=FONTB, fontSize=14, leading=18, alignment=2, textColor=PRICEGR)
     st_cell_c = ParagraphStyle('cc', parent=st_cell, alignment=1)
     st_cell_r = ParagraphStyle('cr', parent=st_cell, alignment=2)
     st_cellb_r = ParagraphStyle('cbr', parent=st_cellb, alignment=2, textColor=PRICEGR)
@@ -1027,7 +1073,6 @@ def make_pdf(q, filepath):
     include_labor = bool(q.get("include_labor"))
     labor_amt = float(q.get("labor_amount") or 0)
     labor_desc = str(q.get("labor_desc") or "").strip() or "Εργασία & Τοποθέτηση κουφωμάτων"
-    subtotal_val = float(q.get("subtotal") or 0)
 
     offer_type_txt = "ΚΟΥΦΩΜΑΤΑ & ΤΟΠΟΘΕΤΗΣΗ" if (include_labor and labor_amt > 0) else "ΚΟΥΦΩΜΑΤΑ & ΥΛΙΚΑ"
     cust_left = (f"<font size=8 color='#64748b'><b>ΣΤΟΙΧΕΙΑ ΠΕΛΑΤΗ:</b></font><br/>"
@@ -1049,21 +1094,6 @@ def make_pdf(q, filepath):
     ]))
     story.append(cust)
     story.append(Spacer(1, 8))
-
-    # Separate items: if designs exist, filter out items that are already shown as design cards
-    design_names = {str(d.get("name") or "").strip().lower() for d in designs}
-    design_codes = {str(d.get("code") or "").strip().lower() for d in designs if str(d.get("code") or "").strip()}
-    
-    loose_items = []
-    if designs:
-        for it in items:
-            it_name = str(it.get("name") or "").strip()
-            it_lower = it_name.lower()
-            is_des = any(c and c in it_lower for c in design_codes) or any(n and n in it_lower for n in design_names if n != "κούφωμα")
-            if not is_des and not it_name.startswith("📐"):
-                loose_items.append(it)
-    else:
-        loose_items = items
 
     labor_row_needed = include_labor and labor_amt > 0
     labor_desc_lines = [esc(l.strip()) for l in labor_desc.splitlines() if l.strip()]
@@ -1096,215 +1126,170 @@ def make_pdf(q, filepath):
         design_img_cache[key] = found
         return found
 
-    def labor_table_row():
-        return [
-            Paragraph("<font size=7 color='#475569'><b>ΕΡΓΑΣΙΑ</b></font>", st_cell_c),
-            Paragraph(f"<b>ΕΡΓΑΣΙΑ &amp; ΤΟΠΟΘΕΤΗΣΗ</b><br/>"
-                      f"<font size=7.5 color='#475569'>{labor_desc_html}</font>", st_n),
+    discount_percent = parse_discount_percent(q.get("discount_percent", 0))
+    product_total = sum(float(it.get("qty", 0) or 0) * float(it.get("price", 0) or 0) for it in items)
+    discount_amount, subtotal_val, vat_amount, final_total = calculate_quote_totals(
+        product_total, labor_amt, discount_percent, float(q.get("vat_rate") or 0))
+    story.append(Paragraph("ΣΥΝΟΨΗ ΠΡΟΣΦΟΡΑΣ", st_h))
+    overview_rows = [[
+        Paragraph("<b>Προϊόν / Εργασία</b>", st_cellh),
+        Paragraph("<b>Ποσ.</b>", st_cellh),
+        Paragraph("<b>Μον.</b>", st_cellh),
+        Paragraph("<b>Τιμή μον.</b>", st_cellh),
+        Paragraph("<b>Σύνολο</b>", st_cellh),
+    ]]
+    for item in items:
+        qty = float(item.get("qty", 0) or 0)
+        unit_price = float(item.get("price", 0) or 0)
+        overview_rows.append([
+            Paragraph(esc(item.get("name") or "Προϊόν"), st_cell),
+            Paragraph(f"{qty:g}", st_cell_c),
+            Paragraph(esc(item.get("unit") or "τεμ."), st_cell_c),
+            Paragraph(fmt(unit_price), st_cell_r),
+            Paragraph(f"<b>{fmt(qty * unit_price)}</b>", st_cellb_r),
+        ])
+    discount_row_index = None
+    labor_row_index = None
+    if discount_percent:
+        discount_row_index = len(overview_rows)
+        overview_rows.append([
+            Paragraph(f"Προσφορά κουφωμάτων ({discount_percent:g}%)", st_cell),
+            "", "", "",
+            Paragraph(f"<b>-{fmt(discount_amount)}</b>", st_cellb_r),
+        ])
+    if labor_row_needed:
+        labor_row_index = len(overview_rows)
+        overview_rows.append([
+            Paragraph(f"<b>ΕΡΓΑΣΙΑ &amp; ΤΟΠΟΘΕΤΗΣΗ</b><br/><font size=7 color='#475569'>{labor_desc_html}</font>", st_cell),
             Paragraph("1", st_cell_c),
             Paragraph("έργο", st_cell_c),
             Paragraph(fmt(labor_amt), st_cell_r),
             Paragraph(f"<b>{fmt(labor_amt)}</b>", st_cellb_r),
-        ]
-
+        ])
+    overview_rows.extend([
+        [Paragraph("<b>Τελική αξία χωρίς ΦΠΑ</b>", st_cell), "", "", "",
+         Paragraph(f"<b>{fmt(subtotal_val)}</b>", st_cellb_r)],
+        [Paragraph(f"ΦΠΑ {float(q.get('vat_rate') or 0):g}%", st_cell), "", "", "",
+         Paragraph(fmt(vat_amount), st_cell_r)],
+        [Paragraph("<b>ΤΕΛΙΚΟ ΣΥΝΟΛΟ ΜΕ ΦΠΑ</b>", st_cellh), "", "", "",
+         Paragraph(f"<b>{fmt(final_total)}</b>", st_cellh)],
+    ])
+    overview = Table(overview_rows, colWidths=[92*mm, 13*mm, 16*mm, 26*mm, 27*mm], repeatRows=1)
+    overview_styles = [
+        ('BACKGROUND', (0, 0), (-1, 0), DARK),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('GRID', (0, 0), (-1, -1), 0.4, colors.HexColor("#cbd5e1")),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ('SPAN', (0, -3), (3, -3)),
+        ('SPAN', (0, -2), (3, -2)),
+        ('SPAN', (0, -1), (3, -1)),
+        ('BACKGROUND', (0, -3), (-1, -2), LIGHT_BG),
+        ('BACKGROUND', (0, -1), (-1, -1), BLUE),
+        ('TEXTCOLOR', (0, -1), (-1, -1), colors.white),
+    ]
+    for row_index in range(1, len(items) + 1):
+        overview_styles.append((
+            'BACKGROUND', (0, row_index), (-1, row_index),
+            colors.white if row_index % 2 else LIGHT_BG,
+        ))
+    if discount_row_index is not None:
+        overview_styles.append(('BACKGROUND', (0, discount_row_index), (-1, discount_row_index),
+                                colors.HexColor("#f0fdf4")))
+    if labor_row_index is not None:
+        overview_styles.append(('BACKGROUND', (0, labor_row_index), (-1, labor_row_index),
+                                colors.HexColor("#f8fafc")))
+    overview.setStyle(TableStyle(overview_styles))
+    story.append(overview)
+    story.append(Spacer(1, 8))
     if designs:
-        prod_rows = [
-            [Paragraph("<b>ΚΟΥΦΩΜΑΤΑ &amp; ΚΑΤΑΣΚΕΥΕΣ</b>", st_cellh), "", "", "", "", ""],
-            [Paragraph("<b>Εικόνα</b>", st_cellh), Paragraph("<b>Υλικό / Εργασία</b>", st_cellh),
-             Paragraph("<b>Ποσ.</b>", st_cellh), Paragraph("<b>Μον.</b>", st_cellh),
-             Paragraph("<b>Τιμή μον.</b>", st_cellh), Paragraph("<b>Σύνολο</b>", st_cellh)],
-        ]
-        tstyle = [
-            ('SPAN', (0, 0), (5, 0)),
-            ('BACKGROUND', (0, 0), (5, 0), HEADBAR),
-            ('BACKGROUND', (0, 1), (5, 1), BLUE),
-            ('TOPPADDING', (0, 0), (5, 0), 5),
-            ('BOTTOMPADDING', (0, 0), (5, 0), 5),
-            ('LEFTPADDING', (0, 0), (5, 0), 8),
-            ('BOX', (0, 0), (-1, -1), 0.6, colors.HexColor("#cbd5e1")),
-            ('ROUNDEDCORNERS', [6, 6, 6, 6]),
-            ('VALIGN', (0, 1), (-1, -1), 'MIDDLE'),
-            ('ALIGN', (0, 1), (0, -1), 'CENTER'),
-            ('TOPPADDING', (0, 1), (-1, -1), 4),
-            ('BOTTOMPADDING', (0, 1), (-1, -1), 4),
-            ('LEFTPADDING', (0, 1), (-1, -1), 6),
-            ('RIGHTPADDING', (0, 1), (-1, -1), 8),
-        ]
+        story.append(Paragraph("ΚΟΥΦΩΜΑΤΑ / ΚΑΤΑΣΚΕΥΕΣ", st_h))
+
         for idx, d in enumerate(designs, start=1):
             pth = img_path(design_image_name(d))
-            w_cm, h_cm = dims_cm_values(d.get("width"), d.get("height"))
-            im = pdf_image(pth, max_w=20*mm, max_h=17*mm) if pth else None
-            if im:
-                content = im
+            schematic = schematic_for(d, show_labels=True)
+            if schematic:
+                art = ScaledFlowable(schematic, 62*mm, 62*mm)
             else:
-                sch = schematic_for(d, show_labels=False)
-                content = ScaledFlowable(sch, 20*mm, 17*mm) if sch else None
-            if content is not None and w_cm and h_cm:
-                art = DimensionedBox(content, w_cm, h_cm, 29*mm, 25*mm)
-            elif content is not None:
-                art = content
-            else:
-                art = Paragraph(
-                    "<font size=10 color='#cbd5e1'>▢</font>",
-                    ParagraphStyle('art_c', fontName=FONT, alignment=1))
-            try:
-                dq = float(d.get("qty", 1) or 1)
-            except Exception:
-                dq = 1
+                im = pdf_image(pth, max_w=54*mm, max_h=54*mm) if pth else None
+                art = im or Paragraph(
+                    "Δεν υπάρχει διαθέσιμη εικόνα",
+                    ParagraphStyle("no_design_image", fontName=FONT, fontSize=8, textColor=TXTG, alignment=1))
+
             code = str(d.get("code") or "").strip()
             raw_name = str(d.get("name") or "").strip() or "Κούφωμα"
-            title_txt = f"{idx}. {raw_name.upper()}"
-            code_html = f" <font size=8 color='#64748b'>({esc(code)})</font>" if code else ""
-            location_str = str(d.get("location") or "").strip()
+            title = f"{idx}. {raw_name.upper()}"
+            if code:
+                title += f"  ({code})"
+
             series = str(d.get("series") or d.get("category") or "—").strip() or "—"
             color = str(d.get("color") or "—").strip() or "—"
-            dim_txt = dims_meters_txt(d.get("width"), d.get("height"))
+            dimensions = dims_meters_txt(d.get("width"), d.get("height"))
+            spec_header = ParagraphStyle("design_spec_header", fontName=FONTB, fontSize=7.5,
+                                         leading=9, textColor=colors.HexColor("#334155"))
+            spec_value = ParagraphStyle("design_spec_value", fontName=FONT, fontSize=8,
+                                        leading=10, textColor=DARK)
+            spec_table = Table([
+                [Paragraph("<b>Σειρά</b>", spec_header),
+                 Paragraph("<b>Χρώμα</b>", spec_header),
+                 Paragraph("<b>Πλάτος × Ύψος</b>", spec_header)],
+                [Paragraph(esc(series), spec_value),
+                 Paragraph(esc(color), spec_value),
+                 Paragraph(esc(dimensions), spec_value)],
+            ], colWidths=[34*mm, 36*mm, 36*mm])
+            spec_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#e2e8f0")),
+                ('GRID', (0, 0), (-1, -1), 0.4, colors.HexColor("#cbd5e1")),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 4),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+                ('TOPPADDING', (0, 0), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ]))
 
-            clean_lines = [esc(l.strip()) for l in str(d.get("descr") or "").splitlines() if l.strip()]
-            desc_inline = " • ".join(clean_lines[:2])
+            desc_lines = [esc(line.strip()) for line in str(d.get("descr") or "").splitlines() if line.strip()]
+            detail_parts = [spec_table]
+            if desc_lines:
+                detail_parts.extend([
+                    Spacer(1, 5),
+                    Paragraph("<br/>".join(desc_lines), st_spec),
+                ])
+            details = Table([[detail_parts]], colWidths=[106*mm])
+            details.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+                ('TOPPADDING', (0, 0), (-1, -1), 0),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+            ]))
+            body = Table([[art, details]], colWidths=[64*mm, 106*mm])
+            body.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('ALIGN', (0, 0), (0, 0), 'CENTER'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+                ('TOPPADDING', (0, 0), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ]))
+            card = Table([[Paragraph(f"<b>{esc(title)}</b>", st_cardh)], [body]],
+                         colWidths=[174*mm])
+            card.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), HEADBAR),
+                ('BOX', (0, 0), (-1, -1), 0.6, colors.HexColor("#94a3b8")),
+                ('LEFTPADDING', (0, 0), (-1, 0), 7),
+                ('RIGHTPADDING', (0, 0), (-1, 0), 7),
+                ('TOPPADDING', (0, 0), (-1, 0), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
+                ('LEFTPADDING', (0, 1), (-1, -1), 0),
+                ('RIGHTPADDING', (0, 1), (-1, -1), 0),
+                ('TOPPADDING', (0, 1), (-1, -1), 0),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 0),
+            ]))
+            story.append(KeepTogether(card))
+            story.append(Spacer(1, 5))
 
-            mid_parts = [
-                f"<font size=9.5 color='#0f172a'><b>{esc(title_txt)}</b>{code_html}</font>" +
-                (f"<br/><font size=8.5 color='#1d4ed8'><b>• Τοποθέτηση: {esc(location_str)}</b></font>" if location_str else ""),
-                f"<font size=8 color='#475569'>Σειρά: <b>{esc(series)}</b></font>",
-                f"<font size=8 color='#475569'>Χρώμα: <b>{esc(color)}</b> &nbsp;|&nbsp; Διαστάσεις: <b>{esc(dim_txt)}</b></font>"
-            ]
-            if desc_inline:
-                mid_parts.append(f"<font size=7.5 color='#64748b'>{desc_inline}</font>")
-            mid_html = "<br/>".join(mid_parts)
-
-            try:
-                unit_price = float(d.get("price", 0) or 0)
-            except Exception:
-                unit_price = 0
-            
-            tot_price = unit_price * dq
-            unit_txt = str(d.get("unit") or "τεμ.").strip() or "τεμ."
-
-            prod_rows.append([
-                art,
-                Paragraph(mid_html, st_n),
-                Paragraph(f"{dq:g}", st_cell_c),
-                Paragraph(esc(unit_txt), st_cell_c),
-                Paragraph(fmt(unit_price), st_cell_r),
-                Paragraph(f"<b>{fmt(tot_price)}</b>", st_cellb_r),
-            ])
-            r_idx = len(prod_rows) - 1
-            bg_col = colors.white if r_idx % 2 == 1 else LIGHT_BG
-            tstyle.append(('BACKGROUND', (0, r_idx), (-1, r_idx), bg_col))
-            if r_idx > 1:
-                tstyle.append(('LINEABOVE', (0, r_idx), (-1, r_idx), 0.4, colors.HexColor("#e2e8f0")))
-
-        if labor_row_needed:
-            prod_rows.append(labor_table_row())
-            r_idx = len(prod_rows) - 1
-            tstyle.append(('BACKGROUND', (0, r_idx), (-1, r_idx), colors.HexColor("#f0fdf4")))
-            tstyle.append(('LINEABOVE', (0, r_idx), (-1, r_idx), 0.4, colors.HexColor("#e2e8f0")))
-
-        prod_table = Table(prod_rows, colWidths=[34*mm, 64*mm, 14*mm, 14*mm, 24*mm, 24*mm], repeatRows=2)
-        prod_table.setStyle(TableStyle(tstyle))
-        story.append(prod_table)
-        story.append(Spacer(1, 8))
-
-    if loose_items:
-        sec_title = "ΣΥΜΠΛΗΡΩΜΑΤΙΚΑ ΥΛΙΚΑ / ΠΑΡΕΛΚΟΜΕΝΑ" if designs else "ΑΝΑΛΥΤΙΚΗ ΠΡΟΣΦΟΡΑ ΥΛΙΚΩΝ"
-        story.append(Paragraph(sec_title, st_h))
-        story.append(Spacer(1, 4))
-        data = [[Paragraph("<b>Εικόνα</b>", st_cellh), Paragraph("<b>Υλικό / Εργασία</b>", st_cellh), Paragraph("<b>Ποσ.</b>", st_cellh),
-                 Paragraph("<b>Μον.</b>", st_cellh), Paragraph("<b>Τιμή μον.</b>", st_cellh),
-                 Paragraph("<b>Σύνολο</b>", st_cellh)]]
-        for it in loose_items:
-            qty = float(it.get("qty", 0)); pr = float(it.get("price", 0))
-            item_name = str(it.get("name", "")).lower()
-            
-            # Try to find a matching thumbnail image based on keywords
-            img_cell = None
-            thumb_files = os.listdir(IMG_DIR) if os.path.exists(IMG_DIR) else []
-            matched_img = None
-            
-            # Priority matching based on item name keywords (Greek and English)
-            if "shutter" in item_name and "screen" in item_name:
-                matched_img = "thumb_s350_shutter_screen.png"
-            elif "shutter" in item_name:
-                matched_img = "thumb_m9660_casement_shutter.png"
-            elif "screen" in item_name or "σίτα" in item_name:
-                matched_img = "thumb_s350_screen.png"
-            elif "door" in item_name or "πόρτα" in item_name:
-                matched_img = "thumb_door.png"
-            elif "fixed" in item_name or "σταθερό" in item_name:
-                matched_img = "thumb_fixed.png"
-            elif "casement" in item_name or "επάλληλο" in item_name:
-                matched_img = "thumb_m9660_single_casement.png"
-            elif "sliding" in item_name or "συρόμενο" in item_name:
-                matched_img = "thumb_s350_simple.png"
-            elif "transom" in item_name:
-                matched_img = "thumb_m9660_transom.png"
-            elif "europa" in item_name or "hybrid" in item_name:
-                matched_img = "thumb_s350_simple.png"
-            elif "διφυλλο" in item_name or "επαλληλο" in item_name:
-                matched_img = "thumb_m9660_single_casement.png"
-            
-            # Fallback: try to find any matching file if priority didn't work
-            if not matched_img and thumb_files:
-                for thumb in thumb_files:
-                    thumb_lower = thumb.lower()
-                    if any(kw in item_name for kw in ["shutter", "screen", "door", "fixed", "casement", "sliding", "transom", "europa", "hybrid", "δίφυλλο", "επαλληλο", "σίτα", "πόρτα", "σταθερό", "συρόμενο"]):
-                        if kw in thumb_lower:
-                            matched_img = thumb
-                            break
-            
-            if matched_img and matched_img in thumb_files:
-                img_path_full = os.path.join(IMG_DIR, matched_img)
-                img = pdf_image(img_path_full, max_w=20*mm, max_h=18*mm)
-                img_cell = img
-            else:
-                img_cell = Paragraph("<font size=10 color='#cbd5e1'>▢</font>", ParagraphStyle('noimg', fontName=FONT, alignment=1))
-            
-            # Use the full description as-is
-            desc_html = f"<font size=7.5 color='#0f172a'>{esc(it.get('name', ''))}</font>"
-            
-            data.append([
-                img_cell,
-                Paragraph(desc_html, st_cell_small),
-                Paragraph(str(qty).rstrip("0").rstrip(".") if "." in str(qty) else str(qty), st_cell),
-                Paragraph(esc(it.get("unit", "")), st_cell),
-                Paragraph(fmt(pr), st_cell),
-                Paragraph(fmt(qty*pr), st_cell),
-            ])
-        if labor_row_needed and not designs:
-            data.append(labor_table_row())
-        t = Table(data, colWidths=[22*mm, 68*mm, 14*mm, 14*mm, 28*mm, 28*mm], repeatRows=1)
-        t.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), BLUE),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('GRID', (0, 0), (-1, -1), 0.4, colors.HexColor("#cbd5e1")),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, LIGHT_BG]),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('ALIGN', (0, 0), (0, -1), 'CENTER'),
-            ('ALIGN', (2, 0), (-1, -1), 'CENTER'),
-            ('TOPPADDING', (0, 0), (-1, -1), 5), ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-        ]))
-        story.append(t)
-        story.append(Spacer(1, 8))
-
-    # Καθαρή αξία, ΦΠΑ και τέλος τιμή — ομαδοποιημένα σε έναν ενωμένο πίνακα
-    totals = []
-    totals.append([Paragraph("<b>Καθαρή Αξία (χωρίς ΦΠΑ):</b>", st_right), Paragraph(f"<b>{fmt(subtotal_val)}</b>", st_right)])
-    totals.append([Paragraph(f"ΦΠΑ {q['vat_rate']}%:", st_right), Paragraph(fmt(q["vat_amount"]), st_right)])
-    totals.append([Paragraph("ΣΥΝΟΛΟ ΜΕ ΦΠΑ", ParagraphStyle('rt_lbl', fontName=FONTB, fontSize=12, textColor=colors.white, alignment=2)),
-                      Paragraph(fmt(q["total"]), ParagraphStyle('rt_val', fontName=FONTB, fontSize=13, leading=16, alignment=2, textColor=colors.white))])
-    tt = Table(totals, colWidths=[114*mm, 60*mm])
-    tt.setStyle(TableStyle([
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('TOPPADDING', (0, 0), (-1, -1), 5), ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-        ('BACKGROUND', (0, 0), (-1, -2), LIGHT_BG),
-        ('BACKGROUND', (0, -1), (-1, -1), BLUE),
-        ('BOX', (0, 0), (-1, -1), 0.6, colors.HexColor("#cbd5e1")),
-        ('ROUNDEDCORNERS', [6, 6, 6, 6]),
-        ('LINEBELOW', (0, -2), (-1, -2), 0.4, colors.HexColor("#cbd5e1")),
-    ]))
-    story.append(tt)
-    story.append(Spacer(1, 10))
     if q.get("notes"):
         story.append(Paragraph("<b>Παρατηρήσεις:</b>", st_n))
         story.append(Paragraph(esc(q["notes"]), st_n))
@@ -1552,8 +1537,7 @@ class App(ctk.CTk):
 
     def _ensure_pdf(self, q):
         """Regenerate the PDF so it always has the current layout, atomically."""
-        num = safe_quote_number(q['number'])
-        path = os.path.join(PDF_DIR, f"Prosfora_{num}.pdf")
+        path = os.path.join(PDF_DIR, quote_pdf_filename(q))
         tmp = path + ".tmp"
         try:
             make_pdf(q, tmp)
@@ -1677,7 +1661,18 @@ class App(ctk.CTk):
         txt_labor_desc.configure(state="disabled", fg_color="#e2e8f0")
         txt_labor_desc.pack(fill="x")
 
-        lbl_total = ctk.CTkLabel(mid, text="", font=("Arial", 13), text_color="#334155", justify="right")
+        discount_row = ctk.CTkFrame(labor_box, fg_color="transparent")
+        discount_row.pack(fill="x", padx=12, pady=(0, 10))
+        ctk.CTkLabel(discount_row, text="Προσφορά στα κουφώματα (%):",
+                     font=("Arial", 13, "bold"), text_color=TXTD).pack(side="left")
+        e_discount = ctk.CTkEntry(discount_row, width=90, font=("Arial", 14))
+        e_discount.insert(0, "0")
+        e_discount.pack(side="left", padx=8)
+        ctk.CTkLabel(discount_row, text="Η έκπτωση δεν εφαρμόζεται στην εργασία.",
+                     font=("Arial", 11), text_color=TXTG).pack(side="left", padx=4)
+
+        lbl_total = ctk.CTkLabel(mid, text="", font=("Arial", 13), text_color="#334155",
+                                 justify="right", wraplength=900)
         lbl_total.pack(anchor="e", padx=18)
         lbl_big = ctk.CTkLabel(mid, text="", font=("Arial", 20, "bold"), text_color=BLUEH)
         lbl_big.pack(anchor="e", padx=18, pady=(0, 6))
@@ -1711,17 +1706,28 @@ class App(ctk.CTk):
             except Exception:
                 vr = DEFAULT_FPA
             vr = max(0.0, min(vr, 100.0))
-            vat = sub * vr / 100
+            try:
+                discount_percent = parse_discount_percent(e_discount.get())
+                discount_amount, sub, vat, total = calculate_quote_totals(
+                    sub_mat, labor_amt, discount_percent, vr)
+            except ValueError as exc:
+                lbl_total.configure(text=str(exc), text_color=RED)
+                lbl_big.configure(text="Ελέγξτε την προσφορά", text_color=RED)
+                return 0.0, vr, 0.0, 0.0
 
+            total_lines = [
+                f"Κουφώματα: {fmt(sub_mat)}   •   Προσφορά {discount_percent:g}%: -{fmt(discount_amount)}"
+            ]
             if labor_var.get() and labor_amt > 0:
-                lbl_total.configure(text=f"Υλικά: {fmt(sub_mat)}   •   Εργασία: {fmt(labor_amt)}   •   ΦΠΑ {vr:g}%: {fmt(vat)}")
-            else:
-                lbl_total.configure(text=f"Αρχική αξία: {fmt(sub)}      ΦΠΑ {vr:g}%: {fmt(vat)}")
-            lbl_big.configure(text=f"ΣΥΝΟΛΟ ΜΕ ΦΠΑ: {fmt(sub + vat)}")
-            return sub, vr, vat, sub + vat
+                total_lines.append(f"Εργασία (χωρίς έκπτωση): {fmt(labor_amt)}")
+            total_lines.append(f"Καθαρή αξία χωρίς ΦΠΑ: {fmt(sub)}   •   ΦΠΑ {vr:g}%: {fmt(vat)}")
+            lbl_total.configure(text="\n".join(total_lines), text_color="#334155")
+            lbl_big.configure(text=f"ΣΥΝΟΛΟ ΜΕ ΦΠΑ: {fmt(total)}", text_color=BLUEH)
+            return sub, vr, vat, total
 
         e_vat.bind("<KeyRelease>", lambda e: refresh())
         e_labor_amt.bind("<KeyRelease>", lambda e: refresh())
+        e_discount.bind("<KeyRelease>", lambda e: refresh())
 
         def apply_design_to_row(row, d):
             active_row_ref[0] = row
@@ -1832,6 +1838,7 @@ class App(ctk.CTk):
 
             lst = ctk.CTkScrollableFrame(win, fg_color="#f8fafc", corner_radius=10, height=480)
             lst.pack(fill="both", expand=True, padx=14, pady=(0, 12))
+            bind_scroll(lst, lst, recursive=True)
             
             picker_thumbs = []
 
@@ -1926,6 +1933,7 @@ class App(ctk.CTk):
                             pass
                     card.bind("<Enter>", on_card_enter)
                     card.bind("<Leave>", on_card_leave)
+                    bind_scroll(card, lst, recursive=True)
                 if n == 0:
                     ctk.CTkLabel(lst, text="Δεν βρέθηκε σχέδιο με αυτή την αναζήτηση.", font=("Arial", 13), text_color=TXTG).pack(pady=40)
 
@@ -2143,6 +2151,10 @@ class App(ctk.CTk):
                 })
             if not lines:
                 return messagebox.showwarning("Προσοχή", "Γράψε τουλάχιστον 1 γραμμή κουφώματος")
+            try:
+                discount_percent = parse_discount_percent(e_discount.get())
+            except ValueError as exc:
+                return messagebox.showwarning("Προσφορά", str(exc))
             sub, vr, vat, tot = refresh()
             phone = e_phone.get().strip()
             c = db()
@@ -2187,18 +2199,20 @@ class App(ctk.CTk):
                     "items_json": json.dumps(items, ensure_ascii=False),
                     "designs_json": json.dumps(qdesigns, ensure_ascii=False),
                     "subtotal": sub, "vat_rate": vr, "vat_amount": vat, "total": tot,
+                    "discount_percent": discount_percent,
                     "notes": e_notes.get("1.0", "end").strip()[:2000],
                     "include_labor": 1 if (labor_var.get() and labor_amt > 0) else 0,
                     "labor_amount": labor_amt if labor_var.get() else 0.0,
                     "labor_desc": labor_desc_val}
             c.execute("""INSERT INTO quotes(number,date,customer_id,customer_name,customer_info,
                        items_json,designs_json,subtotal,vat_rate,vat_amount,total,notes,
-                       include_labor,labor_amount,labor_desc)
-                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       include_labor,labor_amount,labor_desc,discount_percent)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                       (qobj["number"], qobj["date"], qobj["customer_id"], qobj["customer_name"],
                        qobj["customer_info"], qobj["items_json"], qobj["designs_json"],
                        qobj["subtotal"], qobj["vat_rate"], qobj["vat_amount"], qobj["total"], qobj["notes"],
-                       qobj["include_labor"], qobj["labor_amount"], qobj["labor_desc"]))
+                       qobj["include_labor"], qobj["labor_amount"], qobj["labor_desc"],
+                       qobj["discount_percent"]))
             for L in lines:
                 code_val = L.get("code")
                 if code_val:
@@ -2213,7 +2227,7 @@ class App(ctk.CTk):
                         c.execute("INSERT INTO materials(name, unit, price) VALUES(?,?,?)", (m_name, unit, pr))
 
             c.commit(); c.close()
-            path = os.path.join(PDF_DIR, f"Prosfora_{qobj['number']}.pdf")
+            path = os.path.join(PDF_DIR, quote_pdf_filename(qobj))
             make_pdf(qobj, path)
             open_path_safe(path)
             open_folder_and_select(path)
