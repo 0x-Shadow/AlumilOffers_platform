@@ -9,7 +9,7 @@ on:
       tag:
         description: 'Tag name for release (e.g. v1.3.1)'
         required: false
-        default: 'v1.3.1'
+        default: 'v1.3.2'
 
 permissions:
   contents: write
@@ -70,20 +70,18 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          name: ${{ github.event.inputs.tag || github.ref_name }} — Offer Discounts & Improved PDFs
+          name: ${{ github.event.inputs.tag || github.ref_name }} — Clearer PDF Quote Summary
           body: |
             ## AluminaOffers ${{ github.event.inputs.tag || github.ref_name }}
 
             ### Τι νέο υπάρχει (What's New)
-            - 💸 **Εκπτώσεις προσφοράς**: Ορίστε ποσοστό έκπτωσης στα κουφώματα και δείτε αυτόματα την καθαρή αξία, τον ΦΠΑ και το τελικό σύνολο. Η εργασία δεν περιλαμβάνεται στην έκπτωση.
-            - 📊 **Αναλυτική σύνοψη PDF**: Οι τιμές, η έκπτωση, η καθαρή αξία χωρίς ΦΠΑ και το τελικό σύνολο εμφανίζονται μαζί στην αρχή της προσφοράς.
-            - 🪟 **Καλύτερη παρουσίαση προϊόντων**: Μεγαλύτερα σχέδια και προδιαγραφές κάτω από τη σύνοψη, χωρίς επανάληψη τιμών.
-            - 🧾 **Ονόματα αρχείων ανά πελάτη**: Τα PDF αποθηκεύονται με το όνομα του πελάτη και τον αριθμό προσφοράς.
-            - 📚 **Κατάλογος 26 μοντέλων**: Τα μοντέλα Alumil περιλαμβάνουν σχέδια και τεχνικές πληροφορίες.
-            - 🔒 **100% Offline**: Όλα τα δεδομένα αποθηκεύονται τοπικά.
+            - 🪟 **Product thumbnails in quote summary** from the local Sxedia catalog.
+            - 📊 **Clearer PDF pricing block** with discount, labor, net value, VAT, and final total.
+            - 🧾 **Improved product and labor row layout** for easier reading.
+            - 🔒 **100% Offline**: All quote and customer data remains local.
 
             ### Αρχεία Εγκατάστασης (Downloads)
-            - **`Setup_AluminaOffers_1.3.1.exe`** *(Προτεινόμενο)*: Πλήρης αυτόματος οδηγός εγκατάστασης για Windows 10/11.
+            - **`Setup_AluminaOffers_1.3.2.exe`** *(Προτεινόμενο)*: Πλήρης αυτόματος οδηγός εγκατάστασης για Windows 10/11.
             - **`AluminaOffers.exe`**: Portable έκδοση χωρίς εγκατάσταση.
           files: |
             AluminaOffers.exe

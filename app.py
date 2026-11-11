@@ -3,7 +3,7 @@
 AluminaOffers v1.2.7 - Προσφορές Αλουμινάδων για Windows
 Dashboard | Νέα Προσφορά (μία οθόνη) | Κατάλογος | Στοιχεία+Λογότυπο | PDF με ΦΠΑ
 """
-__version__ = "1.3.1"
+__version__ = "1.3.2"
 import os, sqlite3, json, shutil, re, html, sys, subprocess, unicodedata, urllib.parse, math
 from datetime import datetime
 from tkinter import messagebox, filedialog
@@ -1131,7 +1131,71 @@ def make_pdf(q, filepath):
     discount_amount, subtotal_val, vat_amount, final_total = calculate_quote_totals(
         product_total, labor_amt, discount_percent, float(q.get("vat_rate") or 0))
     story.append(Paragraph("ΣΥΝΟΨΗ ΠΡΟΣΦΟΡΑΣ", st_h))
+
+    def item_materials_for(item):
+        materials = []
+        direct = item.get("materials") or []
+        if isinstance(direct, list):
+            materials = direct
+        elif isinstance(direct, str):
+            try:
+                materials = json.loads(direct)
+            except Exception:
+                materials = []
+        if materials:
+            return materials
+
+        item_key = str(item.get("code") or "").strip().lower()
+        item_name = str(item.get("base") or item.get("name") or "").strip().lower()
+        for d in designs:
+            d_code = str(d.get("code") or "").strip().lower()
+            d_name = str(d.get("name") or "").strip().lower()
+            if (item_key and item_key == d_code) or (item_name and item_name == d_name):
+                mats = d.get("materials") or []
+                if isinstance(mats, str):
+                    try:
+                        mats = json.loads(mats)
+                    except Exception:
+                        mats = []
+                return mats if isinstance(mats, list) else []
+        return []
+
+    def item_photo_cell(item):
+        item_code = str(item.get("code") or "").strip().lower()
+        item_name = fold_el(item.get("base") or item.get("name") or "").strip()
+        matched_design = None
+        for design in designs:
+            design_code = str(design.get("code") or "").strip().lower()
+            design_name = fold_el(design.get("name") or "").strip()
+            if item_code and item_code == design_code:
+                matched_design = design
+                break
+            if design_name and (
+                item_name == design_name
+                or item_name.startswith(design_name + " ")
+                or item_name.startswith(design_name + "(")
+            ):
+                if matched_design is None or len(design_name) > len(
+                    fold_el(matched_design.get("name") or "").strip()
+                ):
+                    matched_design = design
+
+        img_name = str(item.get("image") or "").strip()
+        pth = img_path(img_name) if img_name else None
+        if pth is None and matched_design:
+            pth = img_path(design_image_name(matched_design))
+        if pth:
+            photo = pdf_image(pth, max_w=30*mm, max_h=22*mm)
+            if photo is not None:
+                return photo
+        return Paragraph(
+            "—",
+            ParagraphStyle("item_photo_placeholder", fontName=FONT, fontSize=9,
+                           textColor=TXTG, alignment=1, leading=10),
+        )
+
     overview_rows = [[
+        Paragraph("<b>Εικ.</b>", st_cellh),
         Paragraph("<b>Προϊόν / Εργασία</b>", st_cellh),
         Paragraph("<b>Ποσ.</b>", st_cellh),
         Paragraph("<b>Μον.</b>", st_cellh),
@@ -1141,8 +1205,11 @@ def make_pdf(q, filepath):
     for item in items:
         qty = float(item.get("qty", 0) or 0)
         unit_price = float(item.get("price", 0) or 0)
+        raw_name = str(item.get("name") or "Προϊόν")
+        display_name = esc(raw_name).replace(" - ", "<br/>").replace(" (", "<br/>(")
         overview_rows.append([
-            Paragraph(esc(item.get("name") or "Προϊόν"), st_cell),
+            item_photo_cell(item),
+            Paragraph(display_name, st_cell),
             Paragraph(f"{qty:g}", st_cell_c),
             Paragraph(esc(item.get("unit") or "τεμ."), st_cell_c),
             Paragraph(fmt(unit_price), st_cell_r),
@@ -1150,45 +1217,75 @@ def make_pdf(q, filepath):
         ])
     discount_row_index = None
     labor_row_index = None
+    discount_label_style = ParagraphStyle(
+        "discount_label", parent=st_cellb, fontSize=10, leading=13,
+        textColor=colors.HexColor("#166534"))
+    discount_value_style = ParagraphStyle(
+        "discount_value", parent=st_cellb_r, fontSize=10, leading=13,
+        textColor=colors.HexColor("#15803d"))
+    labor_label_style = ParagraphStyle(
+        "labor_label", parent=st_cell, fontSize=9.5, leading=13,
+        textColor=colors.HexColor("#1e3a5f"))
+    labor_value_style = ParagraphStyle(
+        "labor_value", parent=st_cellb_r, fontSize=10, leading=13,
+        textColor=colors.HexColor("#1e3a8a"))
     if discount_percent:
         discount_row_index = len(overview_rows)
         overview_rows.append([
-            Paragraph(f"Προσφορά κουφωμάτων ({discount_percent:g}%)", st_cell),
-            "", "", "",
-            Paragraph(f"<b>-{fmt(discount_amount)}</b>", st_cellb_r),
+            Paragraph(f"<b>Έκπτωση κουφωμάτων ({discount_percent:g}%)</b>", discount_label_style),
+            "", "", "", "",
+            Paragraph(f"<b>-{fmt(discount_amount)}</b>", discount_value_style),
         ])
     if labor_row_needed:
         labor_row_index = len(overview_rows)
         overview_rows.append([
-            Paragraph(f"<b>ΕΡΓΑΣΙΑ &amp; ΤΟΠΟΘΕΤΗΣΗ</b><br/><font size=7 color='#475569'>{labor_desc_html}</font>", st_cell),
-            Paragraph("1", st_cell_c),
-            Paragraph("έργο", st_cell_c),
-            Paragraph(fmt(labor_amt), st_cell_r),
-            Paragraph(f"<b>{fmt(labor_amt)}</b>", st_cellb_r),
+            Paragraph(
+                f"<b>ΕΡΓΑΣΙΑ &amp; ΤΟΠΟΘΕΤΗΣΗ</b>"
+                f"<br/>{labor_desc_html}",
+                labor_label_style),
+            "", "", "", "",
+            Paragraph(f"<b>{fmt(labor_amt)}</b>", labor_value_style),
         ])
+    summary_label = ParagraphStyle(
+        "summary_label", parent=st_cellb, alignment=0, fontSize=9.5,
+        leading=13, textColor=colors.HexColor("#334155"))
+    summary_value = ParagraphStyle(
+        "summary_value", parent=st_cell, alignment=2, fontSize=9.5,
+        leading=13, textColor=colors.HexColor("#334155"))
+    summary_total_label = ParagraphStyle(
+        "summary_total_label", parent=st_cellh, alignment=0, fontSize=10.5,
+        leading=14, textColor=colors.white)
+    summary_total_value = ParagraphStyle(
+        "summary_total_value", parent=st_cellh, alignment=2, fontSize=12,
+        leading=15, textColor=colors.white)
     overview_rows.extend([
-        [Paragraph("<b>Τελική αξία χωρίς ΦΠΑ</b>", st_cell), "", "", "",
-         Paragraph(f"<b>{fmt(subtotal_val)}</b>", st_cellb_r)],
-        [Paragraph(f"ΦΠΑ {float(q.get('vat_rate') or 0):g}%", st_cell), "", "", "",
-         Paragraph(fmt(vat_amount), st_cell_r)],
-        [Paragraph("<b>ΤΕΛΙΚΟ ΣΥΝΟΛΟ ΜΕ ΦΠΑ</b>", st_cellh), "", "", "",
-         Paragraph(f"<b>{fmt(final_total)}</b>", st_cellh)],
+        [Paragraph("Τελική αξία χωρίς ΦΠΑ", summary_label), "", "", "", "",
+         Paragraph(f"<b>{fmt(subtotal_val)}</b>", summary_value)],
+        [Paragraph(f"ΦΠΑ {float(q.get('vat_rate') or 0):g}%", summary_label), "", "", "", "",
+         Paragraph(fmt(vat_amount), summary_value)],
+        [Paragraph("Τελικό σύνολο με ΦΠΑ", summary_total_label), "", "", "", "",
+         Paragraph(f"<b>{fmt(final_total)}</b>", summary_total_value)],
     ])
-    overview = Table(overview_rows, colWidths=[92*mm, 13*mm, 16*mm, 26*mm, 27*mm], repeatRows=1)
+    overview = Table(overview_rows, colWidths=[34*mm, 55*mm, 12*mm, 15*mm, 27*mm, 31*mm], repeatRows=1)
     overview_styles = [
         ('BACKGROUND', (0, 0), (-1, 0), DARK),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
         ('GRID', (0, 0), (-1, -1), 0.4, colors.HexColor("#cbd5e1")),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+        ('ALIGN', (2, 0), (-1, -1), 'CENTER'),
         ('TOPPADDING', (0, 0), (-1, -1), 5),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-        ('SPAN', (0, -3), (3, -3)),
-        ('SPAN', (0, -2), (3, -2)),
-        ('SPAN', (0, -1), (3, -1)),
-        ('BACKGROUND', (0, -3), (-1, -2), LIGHT_BG),
-        ('BACKGROUND', (0, -1), (-1, -1), BLUE),
+        ('SPAN', (0, -3), (4, -3)),
+        ('SPAN', (0, -2), (4, -2)),
+        ('SPAN', (0, -1), (4, -1)),
+        ('BACKGROUND', (0, -3), (-1, -2), colors.HexColor("#f8fafc")),
+        ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor("#17324d")),
         ('TEXTCOLOR', (0, -1), (-1, -1), colors.white),
+        ('LINEABOVE', (0, -3), (-1, -3), 0.8, colors.HexColor("#94a3b8")),
+        ('LEFTPADDING', (0, -3), (-1, -1), 12),
+        ('RIGHTPADDING', (0, -3), (-1, -1), 12),
+        ('TOPPADDING', (0, -3), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, -3), (-1, -1), 8),
     ]
     for row_index in range(1, len(items) + 1):
         overview_styles.append((
@@ -1196,11 +1293,27 @@ def make_pdf(q, filepath):
             colors.white if row_index % 2 else LIGHT_BG,
         ))
     if discount_row_index is not None:
+        overview_styles.append(('SPAN', (0, discount_row_index), (4, discount_row_index)))
         overview_styles.append(('BACKGROUND', (0, discount_row_index), (-1, discount_row_index),
-                                colors.HexColor("#f0fdf4")))
+                                colors.HexColor("#ecfdf3")))
+        overview_styles.extend([
+            ('LINEBEFORE', (0, discount_row_index), (0, discount_row_index), 3, colors.HexColor("#22a06b")),
+            ('LEFTPADDING', (0, discount_row_index), (-1, discount_row_index), 12),
+            ('RIGHTPADDING', (0, discount_row_index), (-1, discount_row_index), 12),
+            ('TOPPADDING', (0, discount_row_index), (-1, discount_row_index), 8),
+            ('BOTTOMPADDING', (0, discount_row_index), (-1, discount_row_index), 8),
+        ])
     if labor_row_index is not None:
+        overview_styles.append(('SPAN', (0, labor_row_index), (4, labor_row_index)))
         overview_styles.append(('BACKGROUND', (0, labor_row_index), (-1, labor_row_index),
-                                colors.HexColor("#f8fafc")))
+                                colors.HexColor("#eff6ff")))
+        overview_styles.extend([
+            ('LINEBEFORE', (0, labor_row_index), (0, labor_row_index), 3, colors.HexColor("#3b82f6")),
+            ('LEFTPADDING', (0, labor_row_index), (-1, labor_row_index), 12),
+            ('RIGHTPADDING', (0, labor_row_index), (-1, labor_row_index), 12),
+            ('TOPPADDING', (0, labor_row_index), (-1, labor_row_index), 9),
+            ('BOTTOMPADDING', (0, labor_row_index), (-1, labor_row_index), 9),
+        ])
     overview.setStyle(TableStyle(overview_styles))
     story.append(overview)
     story.append(Spacer(1, 8))
@@ -1209,14 +1322,17 @@ def make_pdf(q, filepath):
 
         for idx, d in enumerate(designs, start=1):
             pth = img_path(design_image_name(d))
-            schematic = schematic_for(d, show_labels=True)
-            if schematic:
-                art = ScaledFlowable(schematic, 62*mm, 62*mm)
-            else:
-                im = pdf_image(pth, max_w=54*mm, max_h=54*mm) if pth else None
-                art = im or Paragraph(
-                    "Δεν υπάρχει διαθέσιμη εικόνα",
-                    ParagraphStyle("no_design_image", fontName=FONT, fontSize=8, textColor=TXTG, alignment=1))
+            art = None
+            if pth:
+                art = pdf_image(pth, max_w=52*mm, max_h=34*mm)
+            if art is None:
+                schematic = schematic_for(d, show_labels=True)
+                if schematic:
+                    art = ScaledFlowable(schematic, 52*mm, 34*mm)
+                else:
+                    art = Paragraph(
+                        "Δεν υπάρχει διαθέσιμη εικόνα",
+                        ParagraphStyle("no_design_image", fontName=FONT, fontSize=8, textColor=TXTG, alignment=1))
 
             code = str(d.get("code") or "").strip()
             raw_name = str(d.get("name") or "").strip() or "Κούφωμα"
@@ -1238,7 +1354,7 @@ def make_pdf(q, filepath):
                 [Paragraph(esc(series), spec_value),
                  Paragraph(esc(color), spec_value),
                  Paragraph(esc(dimensions), spec_value)],
-            ], colWidths=[34*mm, 36*mm, 36*mm])
+            ], colWidths=[32*mm, 30*mm, 40*mm])
             spec_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#e2e8f0")),
                 ('GRID', (0, 0), (-1, -1), 0.4, colors.HexColor("#cbd5e1")),
@@ -1250,13 +1366,16 @@ def make_pdf(q, filepath):
             ]))
 
             desc_lines = [esc(line.strip()) for line in str(d.get("descr") or "").splitlines() if line.strip()]
-            detail_parts = [spec_table]
+            details_blocks = [spec_table]
             if desc_lines:
-                detail_parts.extend([
+                details_blocks.extend([
                     Spacer(1, 5),
                     Paragraph("<br/>".join(desc_lines), st_spec),
                 ])
-            details = Table([[detail_parts]], colWidths=[106*mm])
+            details = Table([[Paragraph("", st_spec)]], colWidths=[100*mm])
+            details = Table([[spec_table]], colWidths=[100*mm])
+            if desc_lines:
+                details = Table([[spec_table], [Paragraph("<br/>".join(desc_lines), st_spec)]], colWidths=[100*mm])
             details.setStyle(TableStyle([
                 ('VALIGN', (0, 0), (-1, -1), 'TOP'),
                 ('LEFTPADDING', (0, 0), (-1, -1), 0),
@@ -1264,10 +1383,20 @@ def make_pdf(q, filepath):
                 ('TOPPADDING', (0, 0), (-1, -1), 0),
                 ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
             ]))
-            body = Table([[art, details]], colWidths=[64*mm, 106*mm])
+            image_cell = Table([[art]], colWidths=[52*mm])
+            image_cell.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('ALIGN', (0, 0), (0, 0), 'CENTER'),
+                ('BOX', (0, 0), (-1, -1), 0.6, colors.HexColor("#cbd5e1")),
+                ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#f8fafc')),
+                ('LEFTPADDING', (0, 0), (-1, -1), 4),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+                ('TOPPADDING', (0, 0), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ]))
+            body = Table([[image_cell, details]], colWidths=[52*mm, 100*mm])
             body.setStyle(TableStyle([
                 ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                ('ALIGN', (0, 0), (0, 0), 'CENTER'),
                 ('LEFTPADDING', (0, 0), (-1, -1), 6),
                 ('RIGHTPADDING', (0, 0), (-1, -1), 6),
                 ('TOPPADDING', (0, 0), (-1, -1), 6),
