@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-Europa v1.5.0 - Προσφορές Αλουμινάδων για Windows
+Europa v1.5.1 - Προσφορές Αλουμινάδων για Windows
 Dashboard | Νέα Προσφορά (μία οθόνη) | Κατάλογος | Στοιχεία+Λογότυπο | PDF με ΦΠΑ
 """
-__version__ = "1.5.0"
+__version__ = "1.5.1"
 APP_NAME = "Europa"
 import os, sqlite3, json, shutil, re, html, sys, subprocess, unicodedata, urllib.parse, math
 import csv, queue, threading, traceback, webbrowser
@@ -23,6 +23,13 @@ MAX_UPLOAD_BYTES = 15 * 1024 * 1024
 def esc(s):
     """Escape user text for ReportLab Paragraph (mini-HTML)."""
     return html.escape(str(s or ""), quote=False)
+
+def pdf_brand_text(value):
+    """Show the Europa brand in PDFs, including quotes saved with old ALUMIL data."""
+    text = str(value or "")
+    text = re.sub(r"ALUMIL\s*/\s*ALUMIL\s+", "EUROPA/", text, flags=re.I)
+    text = re.sub(r"ALUMIL\s*/\s*", "EUROPA/", text, flags=re.I)
+    return re.sub(r"\bALUMIL\b", "EUROPA", text, flags=re.I)
 
 def safe_quote_number(s, fallback="prosfora"):
     s = str(s or "").strip() or fallback
@@ -1416,7 +1423,7 @@ def make_pdf(q, filepath):
     for item in items:
         qty = float(item.get("qty", 0) or 0)
         unit_price = float(item.get("price", 0) or 0)
-        raw_name = str(item.get("name") or "Προϊόν")
+        raw_name = pdf_brand_text(item.get("name") or "Προϊόν")
         display_name = esc(raw_name).replace(" - ", "<br/>").replace(" (", "<br/>(")
         overview_rows.append([
             item_photo_cell(item),
@@ -1546,12 +1553,12 @@ def make_pdf(q, filepath):
                         ParagraphStyle("no_design_image", fontName=FONT, fontSize=8, textColor=TXTG, alignment=1))
 
             code = str(d.get("code") or "").strip()
-            raw_name = str(d.get("name") or "").strip() or "Κούφωμα"
+            raw_name = pdf_brand_text(d.get("name") or "").strip() or "Κούφωμα"
             title = f"{idx}. {raw_name.upper()}"
             if code:
                 title += f"  ({code})"
 
-            series = str(d.get("series") or d.get("category") or "—").strip() or "—"
+            series = pdf_brand_text(d.get("series") or d.get("category") or "—").strip() or "—"
             color = str(d.get("color") or "—").strip() or "—"
             dimensions = dims_meters_txt(d.get("width"), d.get("height"))
             spec_header = ParagraphStyle("design_spec_header", fontName=FONTB, fontSize=7.5,
@@ -1576,7 +1583,7 @@ def make_pdf(q, filepath):
                 ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
             ]))
 
-            desc_lines = [esc(line.strip()) for line in str(d.get("descr") or "").splitlines() if line.strip()]
+            desc_lines = [esc(pdf_brand_text(line.strip())) for line in str(d.get("descr") or "").splitlines() if line.strip()]
             details_blocks = [spec_table]
             if desc_lines:
                 details_blocks.extend([
