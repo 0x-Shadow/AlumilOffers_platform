@@ -28,11 +28,13 @@ pip install -r requirements.txt
 ## Βήμα 5 — Φτιάξιμο .exe (προαιρετικό)
 ```bat
 pip install pyinstaller
-python -m PyInstaller --onefile --windowed --name AluminaOffers app.py
+python -m PyInstaller --onefile --windowed --name Europa app.py
 ```
-Το `.exe` βγαίνει στον φάκελο `dist/`. Βάλ' το μέσα στον φάκελο του
-προγράμματος — εκεί αποθηκεύονται η βάση (`alumina.db`), οι εικόνες
-(`Sxedia/`) και τα PDF (`PDF_Prosfores/`).
+Το `.exe` βγαίνει στον φάκελο `dist/`. Τα δεδομένα (βάση, εικόνες, PDF)
+δεν αποθηκεύονται δίπλα στο `.exe` αλλά στον φάκελο χρήστη
+`%APPDATA%\Europa\`, ώστε ούτε ενημέρωση ούτε απεγκατάσταση να μην
+τα σβήνει. Οι επίσημες εκδόσεις χτίζονται από το GitHub Actions και η
+εφαρμογή ενημερώνεται μόνη της (παράθυρο «Ενημέρωση τώρα»).
 
 > Το SmartScreen των Windows ίσως προειδοποιήσει επειδή το `.exe` δεν
 > είναι υπογεγραμμένο → *More info → Run anyway*.

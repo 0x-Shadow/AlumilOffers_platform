@@ -14,8 +14,9 @@ Saved as high-res lossless PNG.
 import os
 from PIL import Image, ImageDraw, ImageFont
 
-BASE = os.path.dirname(os.path.abspath(__file__))
-IMG_DIR = os.path.join(BASE, "Sxedia")
+TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(TOOLS_DIR)
+IMG_DIR = os.path.join(ROOT, "Sxedia")
 os.makedirs(IMG_DIR, exist_ok=True)
 
 CANVAS = 1400

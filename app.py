@@ -1,14 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-AluminaOffers v1.2.7 - Προσφορές Αλουμινάδων για Windows
+Europa v1.5.0 - Προσφορές Αλουμινάδων για Windows
 Dashboard | Νέα Προσφορά (μία οθόνη) | Κατάλογος | Στοιχεία+Λογότυπο | PDF με ΦΠΑ
 """
-__version__ = "1.3.2"
+__version__ = "1.5.0"
+APP_NAME = "Europa"
 import os, sqlite3, json, shutil, re, html, sys, subprocess, unicodedata, urllib.parse, math
+import csv, queue, threading, traceback, webbrowser
 from datetime import datetime
+import tkinter as tk
 from tkinter import messagebox, filedialog
 import customtkinter as ctk
 from PIL import Image as PILImage
+import updater
 # Hardening: cap decompressed pixels (decompression-bomb DoS) + cap file size on upload
 try:
     PILImage.MAX_IMAGE_PIXELS = 50_000_000
@@ -32,12 +36,53 @@ def quote_pdf_filename(q):
     number = safe_quote_number(q.get("number"))
     return f"{client}_{number}.pdf"
 
-def parse_discount_percent(value):
+def parse_decimal(value):
+    """Forgiving number parser for a Greek workshop keyboard.
+
+    Accepts 1500, 1500.5, 1.500,50, 1500,50, "1.500 €", spaces, NBSP.
+    Returns None when the text is not a number.
+    """
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        number = float(value)
+        return number if math.isfinite(number) else None
+    text = str(value).strip()
+    if not text:
+        return None
+    text = (text.replace("€", "").replace(" ", "").replace("\u00a0", "")
+                .replace("\u202f", ""))
+    if not re.fullmatch(r"[+-]?[0-9.,]+", text):
+        return None
+    sign = ""
+    if text[0] in "+-":
+        sign, text = text[0], text[1:]
+    if not text or not any(ch.isdigit() for ch in text):
+        return None
+    if "," in text and "." in text:
+        if text.rfind(",") > text.rfind("."):
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            text = text.replace(",", "")
+    elif "," in text:
+        text = text.replace(".", "").replace(",", ".")
+    elif text.count(".") > 1:
+        text = text.replace(".", "")
+    elif text.count(".") == 1:
+        whole, frac = text.split(".")
+        if len(frac) == 3 and whole not in ("", "0"):
+            text = whole + frac
     try:
-        percent = float(str(value or "0").strip().replace(",", "."))
-    except (TypeError, ValueError) as exc:
-        raise ValueError("Το ποσοστό προσφοράς πρέπει να είναι αριθμός από 0 έως 100.") from exc
-    if not math.isfinite(percent) or not 0 <= percent <= 100:
+        number = float(sign + text)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+def parse_discount_percent(value):
+    percent = parse_decimal(value)
+    if percent is None:
+        raise ValueError("Το ποσοστό προσφοράς πρέπει να είναι αριθμός από 0 έως 100.")
+    if not 0 <= percent <= 100:
         raise ValueError("Το ποσοστό προσφοράς πρέπει να είναι από 0 έως 100.")
     return percent
 
@@ -137,21 +182,150 @@ from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table,
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
-# Στην εκτελέσιμη έκδοση (PyInstaller) το __file__ δείχνει στον προσωρινό
-# φάκελο εξαγωγής (_MEI...), που διαγράφεται στο κλείσιμο → όλα τα δεδομένα
-# θα χανότουν. Άρα όταν είναι frozen, βάσε έχει ο φάκελος του ίδιου του exe
-# (δίπλα του: alumina.db, Sxedia/, PDF_Prosfores/, logo.png — όπως και το README).
-# Σε εκτέλεση από πηγή αλλάζει τίποτα.
+# Τα δεδομένα ζουν σε φάκελο χρήστη (Windows: %APPDATA%\Europa), ΟΧΙ δίπλα
+# στο exe. Έτσι ούτε μια ενημέρωση ούτε μια απεγκατάσταση μπορεί να σβήσει
+# προσφορές/πελάτες. Παλιές εκδόσεις (AluminaOffers) κρατούσαν τα δεδομένα
+# αλλού — γίνεται μια φορά αντιγραφή τους στον νέο φάκελο Europa, χωρίς να
+# πειραχτούν τα παλιά αρχεία.
 if getattr(sys, "frozen", False):
-    BASE = os.path.dirname(os.path.abspath(sys.executable))
+    LEGACY_BASE = os.path.dirname(os.path.abspath(sys.executable))
 else:
-    BASE = os.path.dirname(os.path.abspath(__file__))
-DB = os.path.join(BASE, "alumina.db")
+    LEGACY_BASE = os.path.dirname(os.path.abspath(__file__))
+
+DATA_DIRNAME = APP_NAME
+DB_NAME = "europa.db"
+_LEGACY_DIRNAMES = ("AluminaOffers",)
+_LEGACY_DB_NAMES = ("alumina.db", "europa.db")
+
+def _platform_data_root():
+    home = os.path.expanduser("~")
+    if sys.platform == "win32":
+        return os.environ.get("APPDATA") or os.path.join(home, "AppData", "Roaming")
+    if sys.platform == "darwin":
+        return os.path.join(home, "Library", "Application Support")
+    return os.environ.get("XDG_DATA_HOME") or os.path.join(home, ".local", "share")
+
+def _user_data_dir():
+    """Per-user data folder. EUROPA_DATA_DIR overrides it (portable/tests)."""
+    override = (os.environ.get("EUROPA_DATA_DIR")
+                or os.environ.get("ALUMINA_DATA_DIR") or "").strip()
+    if override:
+        return os.path.abspath(os.path.expanduser(override))
+    return os.path.join(_platform_data_root(), DATA_DIRNAME)
+
+def _legacy_data_dirs(target):
+    """Old data locations, newest first: roaming folder, old install folder, exe folder."""
+    found = []
+    root = _platform_data_root()
+    for name in _LEGACY_DIRNAMES:
+        found.append(os.path.join(root, name))
+    # Versions up to 1.3.x installed into %LOCALAPPDATA%\AluminaOffers and kept
+    # the database next to the exe.
+    local = os.environ.get("LOCALAPPDATA") or ""
+    if local:
+        for name in _LEGACY_DIRNAMES:
+            found.append(os.path.join(local, name))
+    found.append(LEGACY_BASE)
+    unique = []
+    for path in found:
+        if os.path.abspath(path) != os.path.abspath(target) and path not in unique:
+            unique.append(path)
+    return unique
+
+def _legacy_db(folder):
+    for name in _LEGACY_DB_NAMES:
+        path = os.path.join(folder, name)
+        if os.path.isfile(path):
+            return path
+    return None
+
+def _migrate_legacy_data(data_base):
+    """One-time copy of older data (copies, never moves; old files stay as backup)."""
+    target_db = os.path.join(data_base, DB_NAME)
+    if os.path.exists(target_db):
+        return True
+    for source in _legacy_data_dirs(data_base):
+        source_db = _legacy_db(source)
+        if not source_db:
+            continue
+        try:
+            os.makedirs(data_base, exist_ok=True)
+            shutil.copy2(source_db, target_db)
+            for folder in ("Sxedia", "PDF_Prosfores"):
+                src = os.path.join(source, folder)
+                if os.path.isdir(src):
+                    shutil.copytree(src, os.path.join(data_base, folder), dirs_exist_ok=True)
+            logo = os.path.join(source, "logo.png")
+            if os.path.isfile(logo):
+                shutil.copy2(logo, os.path.join(data_base, "logo.png"))
+            return True
+        except Exception:
+            continue
+    return False
+
+BASE = _user_data_dir()
+DB = os.path.join(BASE, DB_NAME)
 PDF_DIR = os.path.join(BASE, "PDF_Prosfores")
 IMG_DIR = os.path.join(BASE, "Sxedia")
 LOGO_FILE = os.path.join(BASE, "logo.png")
+
+_migrate_legacy_data(BASE)
+if not os.path.exists(DB):
+    # Migration could not copy (permissions/disk). Keep working on the old data
+    # instead of silently opening an empty workshop database.
+    for _source in _legacy_data_dirs(BASE):
+        _source_db = _legacy_db(_source)
+        if _source_db:
+            BASE = _source
+            DB = _source_db
+            PDF_DIR = os.path.join(BASE, "PDF_Prosfores")
+            IMG_DIR = os.path.join(BASE, "Sxedia")
+            LOGO_FILE = os.path.join(BASE, "logo.png")
+            break
+os.makedirs(BASE, exist_ok=True)
 os.makedirs(PDF_DIR, exist_ok=True)
 os.makedirs(IMG_DIR, exist_ok=True)
+ERROR_LOG = os.path.join(BASE, "errors.log")
+
+_INSTANCE_LOCK = None
+
+def acquire_single_instance():
+    """True when this is the only Europa instance for the current user."""
+    global _INSTANCE_LOCK
+    try:
+        if sys.platform == "win32":
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.CreateMutexW(None, False, "EuropaAluminaOffers")
+            if not handle:
+                return True  # never block the app if the OS call fails
+            if kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+                return False
+            _INSTANCE_LOCK = handle
+            return True
+        import fcntl
+        lock_file = open(os.path.join(BASE, "europa.lock"), "a+")
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            lock_file.close()
+            return False
+        _INSTANCE_LOCK = lock_file
+        return True
+    except (OSError, ImportError):
+        # Fail open only for unexpected platform errors, never for a held lock.
+        return True
+
+def log_exception(exc_type, exc_value, exc_tb, context=""):
+    """Append a technical traceback to the user's errors.log (for support)."""
+    try:
+        if os.path.isfile(ERROR_LOG) and os.path.getsize(ERROR_LOG) > 1_000_000:
+            os.replace(ERROR_LOG, ERROR_LOG + ".old")
+        with open(ERROR_LOG, "a", encoding="utf-8") as fh:
+            fh.write(f"\n[{datetime.now():%Y-%m-%d %H:%M:%S}] {context}\n")
+            traceback.print_exception(exc_type, exc_value, exc_tb, file=fh)
+    except Exception:
+        pass
 
 def _register_pdf_fonts():
     """Arial on Windows, Liberation/DejaVu/Noto elsewhere — Helvetica has no Greek."""
@@ -478,6 +652,47 @@ def fmt(n):
     try: return f"{float(n):,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
     except: return "0,00 €"
 
+def _year_of_date(date_text):
+    try:
+        return int(str(date_text).strip().split("/")[-1][:4])
+    except Exception:
+        return None
+
+def quote_years():
+    """Years that actually contain quotes, newest first (current year fallback)."""
+    c = db()
+    dates = [r["date"] for r in c.execute("SELECT date FROM quotes").fetchall()]
+    c.close()
+    years = sorted({_year_of_date(d) for d in dates if _year_of_date(d)}, reverse=True)
+    return years or [datetime.now().year]
+
+def export_quotes_csv(path, year=None):
+    """Export quotes to a semicolon CSV with UTF-8 BOM so Greek Excel opens it cleanly."""
+    c = db()
+    rows = c.execute("SELECT * FROM quotes ORDER BY id").fetchall()
+    c.close()
+    selected = [r for r in rows if year is None or _year_of_date(r["date"]) == year]
+    with open(path, "w", encoding="utf-8-sig", newline="") as fh:
+        writer = csv.writer(fh, delimiter=";")
+        writer.writerow(["Αριθμός", "Ημερομηνία", "Πελάτης", "Στοιχεία πελάτη", "Είδη",
+                         "Καθαρή αξία", "ΦΠΑ %", "ΦΠΑ", "Σύνολο", "Έκπτωση %",
+                         "Εργασία", "Παρατηρήσεις"])
+        for r in selected:
+            try:
+                items = json.loads(r["items_json"] or "[]")
+                items_txt = " | ".join(
+                    f"{it.get('name', '')} x{float(it.get('qty', 0) or 0):g}" for it in items)
+            except Exception:
+                items_txt = ""
+            writer.writerow([
+                r["number"], r["date"], r["customer_name"], r["customer_info"], items_txt,
+                f"{float(r['subtotal'] or 0):.2f}", f"{float(r['vat_rate'] or 0):.2f}",
+                f"{float(r['vat_amount'] or 0):.2f}", f"{float(r['total'] or 0):.2f}",
+                f"{float(r['discount_percent'] or 0):.2f}",
+                f"{float(r['labor_amount'] or 0):.2f}", r["notes"] or "",
+            ])
+    return len(selected)
+
 def pdf_image(path, max_w=62*mm, max_h=52*mm):
     try:
         with PILImage.open(path) as im:
@@ -488,7 +703,7 @@ def pdf_image(path, max_w=62*mm, max_h=52*mm):
         return None
 
 # ================= 2D ΣΧΗΜΑΤΙΚΑ (Π x Υ σε εκατοστά) =================
-# Alumil-style elevation: thin gray frames, opening arrows, optional roller / σίτα.
+# Europa-style elevation: thin gray frames, opening arrows, optional roller / σίτα.
 GLASSC = colors.HexColor("#eef2f5")
 GLASSDIM = colors.HexColor("#d9dee4")
 FRAMEC = colors.HexColor("#9aa3ad")
@@ -502,12 +717,8 @@ HEADBAR = colors.HexColor("#4b5563")
 PRICEGR = colors.HexColor("#15803d")
 
 def _num(v):
-    """'120' / '120,5' / 120 -> float, αλλιώς None."""
-    try:
-        s = str(v or "").strip().replace(",", ".")
-        return float(s) if s else None
-    except Exception:
-        return None
+    """'120' / '120,5' / '1.500,50' / 120 -> float, αλλιώς None."""
+    return parse_decimal(v)
 
 def fold_el(text):
     """Lowercase Greek without accents, for matching συρόμενο / δίφυλλο / σίτα…"""
@@ -564,7 +775,7 @@ def resolved_category(d):
     return guess_category(d.get("name", ""), "") or cat
 
 class Schematic(Flowable):
-    """Alumil-style 2D elevation: frame, sashes, opening arrows, roller, σίτα.
+    """Europa-style 2D elevation: frame, sashes, opening arrows, roller, σίτα.
     Aspect ratio follows Π x Υ (cm). Extra caption under the drawing."""
 
     BOX_W = 62*mm
@@ -1432,9 +1643,22 @@ ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
 
 class App(ctk.CTk):
+    def report_callback_exception(self, exc_type, exc_value, exc_tb):
+        """Log Tk callback errors and tell the user where the file is."""
+        log_exception(exc_type, exc_value, exc_tb, "Tk callback")
+        try:
+            messagebox.showerror(
+                APP_NAME,
+                "Κάτι πήγε στραβά, αλλά η εφαρμογή συνεχίζει.\n\n"
+                f"Η τεχνική λεπτομέρεια γράφτηκε εδώ:\n{ERROR_LOG}\n\n"
+                "Αν ξανασυμβεί, στείλτε αυτό το αρχείο για υποστήριξη.",
+                parent=self)
+        except Exception:
+            pass
+
     def __init__(self):
         super().__init__()
-        self.title(f"AluminaOffers v{__version__}")
+        self.title(f"{APP_NAME} v{__version__}")
         self.geometry("1220x740")
         self.minsize(1060, 660)
         self._catalog_tab = "Σχέδια"
@@ -1448,7 +1672,7 @@ class App(ctk.CTk):
         self._brand_img_label = ctk.CTkLabel(brand, text="")
         self._brand_img_label.pack(anchor="w")
         self._brand_img = None
-        self._brand_name = ctk.CTkLabel(brand, text="AluminaOffers", font=("Arial", 17, "bold"),
+        self._brand_name = ctk.CTkLabel(brand, text=APP_NAME, font=("Arial", 17, "bold"),
                                        text_color="white", anchor="w")
         self._brand_name.pack(anchor="w")
         ctk.CTkLabel(brand, text=f"Προσφορές αλουμινάδων • v{__version__}", font=("Arial", 11),
@@ -1467,7 +1691,18 @@ class App(ctk.CTk):
                       command=lambda: self.show("new")).pack(fill="x", padx=12, pady=(14, 4))
         self.main = ctk.CTkFrame(self, fg_color=BG, corner_radius=0)
         self.main.pack(side="right", fill="both", expand=True)
+        self._update_box = None
+        self._update_info = None
+        self._update_thread = None
+        self._update_dialog_win = None
+        # Demo hook: ALUMINA_FAKE_UPDATE=1 shows the real update prompt without
+        # publishing a release or downloading anything.
+        self._fake_update = (os.environ.get("EUROPA_FAKE_UPDATE")
+                             or os.environ.get("ALUMINA_FAKE_UPDATE") or "").strip()
+        self._ui_queue = queue.Queue()
+        self.after(120, self._poll_ui_queue)
         self.show("home")
+        self.after(1500, lambda: self._start_update_check(manual=False))
 
     def _popup_setup(self, win):
         """Ensure modal dialog pops up in front of the main window and grabs focus."""
@@ -1505,7 +1740,7 @@ class App(ctk.CTk):
         """Λογότυπο + επωνυμία πάντα ορατά στο sidebar."""
         try:
             comp = get_company()
-            name = comp.get("name", "").strip() or "AluminaOffers"
+            name = comp.get("name", "").strip() or APP_NAME
             self._brand_name.configure(text=name if len(name) <= 24 else name[:23] + "…")
             lg = get_logo()
             if lg:
@@ -1522,11 +1757,447 @@ class App(ctk.CTk):
         except Exception:
             pass
 
+    # ---------- ΕΝΗΜΕΡΩΣΕΙΣ (GitHub Releases) ----------
+    _UPDATE_CACHE_HOURS = 24
+
+    def _ui_call(self, fn, *args):
+        """Queue a callable for the Tk main thread (Tkinter is not thread-safe)."""
+        self._ui_queue.put((fn, args))
+
+    def _poll_ui_queue(self):
+        try:
+            while True:
+                fn, args = self._ui_queue.get_nowait()
+                try:
+                    fn(*args)
+                except Exception as exc:
+                    log_exception(type(exc), exc, exc.__traceback__, "UI queue")
+        except queue.Empty:
+            pass
+        try:
+            self.after(120, self._poll_ui_queue)
+        except Exception:
+            pass
+
+    def _read_settings(self, keys):
+        out = {}
+        try:
+            c = db()
+            marks = ",".join("?" * len(keys))
+            for r in c.execute(f"SELECT key, value FROM settings WHERE key IN ({marks})", tuple(keys)):
+                out[r["key"]] = r["value"]
+            c.close()
+        except Exception:
+            pass
+        return out
+
+    def _write_setting(self, key, value):
+        try:
+            c = db()
+            c.execute("INSERT INTO settings(key,value) VALUES(?,?) "
+                      "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
+            c.commit()
+            c.close()
+        except Exception:
+            pass
+
+    def _start_update_check(self, manual=False):
+        # Opt-out for locked-down/offline machines (see docs/PRIVACY_EL.md).
+        no_check = (os.environ.get("EUROPA_NO_UPDATE_CHECK")
+                    or os.environ.get("ALUMINA_NO_UPDATE_CHECK") or "").strip().lower()
+        if not manual and no_check in ("1", "true", "yes"):
+            return
+        if self._fake_update:
+            version = updater.parse_version(self._fake_update)
+            self._ui_call(self._offer_update, {
+                "version": ".".join(str(p) for p in version) if version else "9.9.9",
+                "tag": "demo", "notes": "", "page_url": updater.RELEASES_URL,
+                "installer_name": None, "installer_url": None, "checksums_url": None,
+            }, True)
+            return
+        if self._update_thread and self._update_thread.is_alive():
+            return
+        self._update_thread = threading.Thread(target=self._update_check_worker,
+                                               args=(manual,), daemon=True)
+        self._update_thread.start()
+
+    def _update_check_worker(self, manual):
+        cached = self._read_settings(["update_checked_at", "update_info"])
+        if not manual and cached.get("update_checked_at"):
+            try:
+                age = datetime.now() - datetime.fromisoformat(cached["update_checked_at"])
+                if age.total_seconds() < self._UPDATE_CACHE_HOURS * 3600:
+                    info = json.loads(cached.get("update_info") or "null")
+                    if info and updater.is_newer(info.get("version", ""), __version__):
+                        self._ui_call(self._offer_update, info)
+                    return
+            except Exception:
+                pass
+        try:
+            info = updater.check_for_update(__version__)
+        except Exception:
+            if manual:
+                self._ui_call(messagebox.showwarning, "Ενημερώσεις",
+                              "Ο έλεγχος δεν ήταν δυνατός.\nΕλέγξτε τη σύνδεσή σας και δοκιμάστε ξανά.")
+            return
+        self._write_setting("update_checked_at", datetime.now().isoformat(timespec="seconds"))
+        self._write_setting("update_info", json.dumps(info, ensure_ascii=False) if info else "")
+        if info:
+            self._ui_call(self._offer_update, info, manual)
+        elif manual:
+            self._ui_call(messagebox.showinfo, "Ενημερώσεις",
+                          f"Έχετε την πιο πρόσφατη έκδοση (v{__version__}).")
+
+    def _offer_update(self, info, force=False):
+        self._update_info = info
+        if self._update_box is None:
+            box = ctk.CTkFrame(self.sidebar, fg_color="#123a75", corner_radius=12,
+                               border_width=1, border_color="#2f5fa8")
+            box.pack(side="bottom", fill="x", padx=12, pady=(4, 12))
+            head = ctk.CTkFrame(box, fg_color="transparent")
+            head.pack(fill="x", padx=10, pady=(8, 0))
+            ctk.CTkLabel(head, text="⬆ Νέα έκδοση", font=("Arial", 12, "bold"),
+                         text_color="#bfdbfe", anchor="w").pack(side="left")
+            ctk.CTkButton(head, text="✕", width=22, height=22, fg_color="transparent",
+                          hover_color="#1e4f96", font=("Arial", 12),
+                          command=self._dismiss_update).pack(side="right")
+            self._update_label = ctk.CTkLabel(box, text="", font=("Arial", 14, "bold"),
+                                             text_color="white", anchor="w")
+            self._update_label.pack(fill="x", padx=10)
+            self._update_btn = ctk.CTkButton(box, text="Ενημέρωση τώρα", height=34,
+                                             corner_radius=8, fg_color=GREEN, hover_color="#15803d",
+                                             font=("Arial", 12, "bold"), command=self._install_update)
+            self._update_btn.pack(fill="x", padx=10, pady=(6, 4))
+            ctk.CTkButton(box, text="Λεπτομέρειες", height=26, fg_color="transparent",
+                          hover_color="#1e4f96", font=("Arial", 11),
+                          command=lambda: webbrowser.open(
+                              (self._update_info or {}).get("page_url") or updater.RELEASES_URL)
+                          ).pack(fill="x", padx=10, pady=(0, 8))
+            self._update_box = box
+        demo = " (δοκιμή)" if self._fake_update else ""
+        self._update_label.configure(text=f"v{info.get('version', '?')} διαθέσιμη{demo}")
+        self._update_btn.configure(state="normal", text="Ενημέρωση τώρα")
+
+        # A real prompt for non-technical users: ask once per version, keep the
+        # sidebar card as the permanent reminder after they choose "later".
+        prompted = self._read_settings(["update_prompted"]).get("update_prompted", "")
+        if not (force or self._fake_update or prompted != info.get("version")):
+            return
+        if not self._fake_update:
+            self._write_setting("update_prompted", info.get("version", ""))
+        self._update_dialog(
+            "Ενημέρωση διαθέσιμη",
+            f"{APP_NAME} v{__version__}   →   v{info.get('version', '?')}",
+            "Υπάρχει νέα έκδοση της εφαρμογής.\n\n"
+            "Με ένα κλικ, η εφαρμογή κατεβάζει την επίσημη έκδοση, ελέγχει "
+            "την ασφάλειά της, εγκαθίσταται και ανοίγει ξανά μόνη της.\n\n"
+            "Οι προσφορές, οι πελάτες και τα σχέδιά σας δεν επηρεάζονται.",
+            "Ενημέρωση τώρα", self._install_update,
+            demo=bool(self._fake_update),
+            notes=self._clean_release_notes(info.get("notes")))
+
+    @staticmethod
+    def _clean_release_notes(text, limit=900):
+        lines = []
+        for raw in str(text or "").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("---") or line.startswith("###"):
+                continue
+            line = line.lstrip("#").strip().replace("**", "").replace("`", "")
+            if line:
+                lines.append(line)
+        return "\n".join(lines)[:limit].strip()
+
+    def _update_dialog(self, title, subtitle, body, primary_text, on_primary,
+                       secondary_text="Αργότερα", demo=False, notes=""):
+        """Modern modal dialog used for every update step."""
+        existing = self._update_dialog_win
+        if existing is not None and existing.winfo_exists():
+            existing.lift()
+            existing.focus_force()
+            return
+        win = ctk.CTkToplevel(self)
+        win.title(f"Ενημέρωση — {APP_NAME}")
+        win.geometry("560x470")
+        win.resizable(False, False)
+        win.configure(fg_color=BG)
+        self._update_dialog_win = win
+
+        def close():
+            try:
+                win.grab_release()
+            except Exception:
+                pass
+            if win.winfo_exists():
+                win.destroy()
+            self._update_dialog_win = None
+
+        def primary():
+            close()
+            on_primary()
+
+        win.protocol("WM_DELETE_WINDOW", close)
+        head = ctk.CTkFrame(win, fg_color=NAVY, corner_radius=0, height=104)
+        head.pack(fill="x")
+        head.pack_propagate(False)
+        ctk.CTkLabel(head, text="⬆", width=56, height=56, corner_radius=28,
+                     fg_color=BLUEH, font=("Arial", 26, "bold"),
+                     text_color="white").pack(side="left", padx=(22, 16))
+        titles = ctk.CTkFrame(head, fg_color="transparent")
+        titles.pack(side="left", fill="y", pady=24)
+        ctk.CTkLabel(titles, text=title, font=("Arial", 20, "bold"),
+                     text_color="white", anchor="w").pack(anchor="w")
+        ctk.CTkLabel(titles, text=subtitle, font=("Arial", 12),
+                     text_color="#93c5fd", anchor="w").pack(anchor="w", pady=(2, 0))
+        ctk.CTkButton(head, text="✕", width=30, height=30, fg_color="transparent",
+                      hover_color="#1e3a8a", font=("Arial", 14),
+                      command=close).pack(side="right", anchor="n", padx=12, pady=12)
+
+        card = ctk.CTkFrame(win, fg_color="white", corner_radius=16,
+                            border_width=1, border_color="#e2e8f0")
+        card.pack(fill="both", expand=True, padx=20, pady=(14, 10))
+        if demo:
+            ctk.CTkLabel(card, text="ΛΕΙΤΟΥΡΓΙΑ ΕΠΙΔΕΙΞΗΣ — δεν θα γίνει καμία εγκατάσταση",
+                         fg_color="#fef3c7", text_color="#92400e", corner_radius=8,
+                         font=("Arial", 11, "bold"), height=30).pack(fill="x", padx=16, pady=(12, 0))
+        ctk.CTkLabel(card, text=body, font=("Arial", 13), text_color=TXTD,
+                     justify="left", anchor="w", wraplength=480).pack(fill="x", padx=18, pady=(14, 4))
+        if notes:
+            ctk.CTkLabel(card, text="Τι νέο υπάρχει", font=("Arial", 12, "bold"),
+                         text_color=BLUEH, anchor="w").pack(fill="x", padx=18, pady=(4, 2))
+            note_box = ctk.CTkTextbox(card, height=92, font=("Arial", 11), fg_color="#f8fafc",
+                                      corner_radius=8, border_width=0, wrap="word")
+            note_box.pack(fill="x", padx=18)
+            note_box.insert("1.0", notes)
+            note_box.configure(state="disabled")
+
+        foot = ctk.CTkFrame(win, fg_color="transparent")
+        foot.pack(fill="x", padx=20, pady=(0, 18))
+        if secondary_text:
+            ctk.CTkButton(foot, text=secondary_text, height=42, corner_radius=10,
+                          fg_color="#e2e8f0", hover_color="#cbd5e1", text_color=TXTD,
+                          font=("Arial", 13, "bold"), command=close).pack(side="right", padx=(8, 0))
+        ctk.CTkButton(foot, text=primary_text, height=42, corner_radius=10,
+                      fg_color=GREEN, hover_color="#15803d", font=("Arial", 13, "bold"),
+                      command=primary).pack(side="right")
+        win.update_idletasks()
+        try:
+            x = self.winfo_rootx() + max(0, (self.winfo_width() - win.winfo_width()) // 2)
+            y = self.winfo_rooty() + max(0, (self.winfo_height() - win.winfo_height()) // 2)
+            win.geometry(f"+{x}+{y}")
+        except Exception:
+            pass
+        self._popup_setup(win)
+
+    def preview_update_dialog(self):
+        """Owner-facing preview of the real update prompt (no download)."""
+        info = {"version": "9.9.9", "tag": "demo", "notes": "",
+                "page_url": updater.RELEASES_URL, "installer_name": None,
+                "installer_url": None, "checksums_url": None}
+        self._update_info = info
+        self._update_dialog(
+            "Ενημέρωση διαθέσιμη",
+            f"{APP_NAME} v{__version__}   →   v9.9.9",
+            "Υπάρχει νέα έκδοση της εφαρμογής.\n\n"
+            "Με ένα κλικ, η εφαρμογή κατεβάζει την επίσημη έκδοση, ελέγχει "
+            "την ασφάλειά της, εγκαθίσταται και ανοίγει ξανά μόνη της.\n\n"
+            "Οι προσφορές, οι πελάτες και τα σχέδιά σας δεν επηρεάζονται.",
+            "Ενημέρωση τώρα", self._preview_update_accept, demo=True)
+
+    def _preview_update_accept(self):
+        self._update_dialog(
+            "Δοκιμή ενημέρωσης",
+            "Έτσι θα γίνει η πραγματική ενημέρωση",
+            "Σε μια πραγματική ενημέρωση η εφαρμογή:\n\n"
+            "1.  Κατεβάζει το επίσημο αρχείο εγκατάστασης.\n"
+            "2.  Ελέγχει την ασφάλειά του (SHA-256).\n"
+            "3.  Εγκαθιστά τη νέα έκδοση και ανοίγει ξανά μόνη της.\n\n"
+            "Τώρα δεν έγινε καμία ενέργεια.",
+            "Κατάλαβα", lambda: None, secondary_text=None, demo=True)
+
+    def _dismiss_update(self):
+        if self._update_box is not None:
+            self._update_box.destroy()
+            self._update_box = None
+
+    def _install_update(self):
+        info = self._update_info
+        if not info:
+            return
+        if self._fake_update:
+            self._update_dialog(
+                "Δοκιμή ενημέρωσης",
+                f"Δοκιμαστική έκδοση v{info.get('version', '?')}",
+                "Σε μια πραγματική ενημέρωση η εφαρμογή:\n\n"
+                "1.  Κατεβάζει το επίσημο αρχείο εγκατάστασης.\n"
+                "2.  Ελέγχει την ασφάλειά του (SHA-256).\n"
+                "3.  Εγκαθιστά τη νέα έκδοση και ανοίγει ξανά μόνη της.\n\n"
+                "Τώρα δεν έγινε καμία ενέργεια.",
+                "Κατάλαβα", lambda: None, secondary_text=None, demo=True)
+            return
+        page = info.get("page_url") or updater.RELEASES_URL
+        # Running from source or a portable copy: never overwrite files silently.
+        if not getattr(sys, "frozen", False) or sys.platform != "win32" or not info.get("installer_url"):
+            webbrowser.open(page)
+            return
+        self._update_pct = -1
+        self._update_btn.configure(state="disabled", text="Λήψη...")
+        threading.Thread(target=self._update_download_worker,
+                         args=(dict(info),), daemon=True).start()
+
+    def _update_download_worker(self, info):
+        try:
+            digest = updater.checksum_for(info)
+            if not digest:
+                self._ui_call(self._update_needs_manual, info)
+                return
+            path = updater.download_installer(info, digest, progress=self._update_progress)
+            self._ui_call(self._update_ready, path)
+        except Exception as exc:
+            self._ui_call(self._update_failed, str(exc))
+
+    def _update_progress(self, done, total):
+        if total:
+            pct = int(done * 100 / total)
+            if pct == getattr(self, "_update_pct", -1):
+                return
+            self._update_pct = pct
+            text = f"Λήψη... {pct}%"
+        else:
+            text = f"Λήψη... {done // (1024 * 1024)} MB"
+        self._ui_call(lambda t=text: self._update_btn.configure(text=t))
+
+    def _update_needs_manual(self, info):
+        if self._update_box is None:
+            return
+        self._update_btn.configure(state="normal", text="Άνοιγμα σελίδας")
+        page = (info or {}).get("page_url") or updater.RELEASES_URL
+        self._update_dialog(
+            "Χειροκίνητη ενημέρωση",
+            "Λείπει το αρχείο ελέγχου ασφαλείας",
+            "Η νέα έκδοση δεν συνοδεύεται από SHA-256 checksum, οπότε η "
+            "εφαρμογή δεν την εγκαθιστά αυτόματα.\n\n"
+            "Θα ανοίξει η επίσημη σελίδα λήψης για να την κατεβάσετε με ασφάλεια.",
+            "Άνοιγμα σελίδας", lambda: webbrowser.open(page))
+
+    def _update_ready(self, path):
+        if self._update_box is None:
+            return
+        vers = (self._update_info or {}).get("version", "?")
+        self._update_btn.configure(state="normal", text="Εγκατάσταση")
+
+        def do_install():
+            try:
+                updater.launch_installer(path)
+            except Exception as exc:
+                log_exception(type(exc), exc, exc.__traceback__, "launch_installer")
+                self._update_dialog(
+                    "Η εγκατάσταση δεν ξεκίνησε",
+                    f"v{vers}",
+                    "Το αρχείο κατέβηκε και επαληθεύτηκε, αλλά δεν άνοιξε.\n\n"
+                    f"Λεπτομέρεια: {exc}\n\n"
+                    "Δοκιμάστε ξανά ή ανοίξτε τη σελίδα εκδόσεων.",
+                    "Κλείσιμο", lambda: None, secondary_text=None)
+                self._update_btn.configure(state="normal", text="Δοκιμάστε ξανά")
+                return
+            # Restart Manager normally closes/restarts the app; this is a fallback.
+            self.after(5000, self.destroy)
+
+        self._update_dialog(
+            "Η ενημέρωση είναι έτοιμη",
+            f"{APP_NAME} v{__version__}   →   v{vers}",
+            "Η λήψη ολοκληρώθηκε και το αρχείο επαληθεύτηκε με SHA-256.\n\n"
+            "Με το «Εγκατάσταση τώρα» η εφαρμογή κλείνει, ενημερώνεται και "
+            "ανοίγει ξανά. Τα δεδομένα σας δεν επηρεάζονται.",
+            "Εγκατάσταση τώρα", do_install)
+
+    def _update_failed(self, msg):
+        if self._update_box is None:
+            return
+        self._update_btn.configure(state="normal", text="Δοκιμάστε ξανά")
+        self._update_dialog(
+            "Η ενημέρωση απέτυχε",
+            "Δεν άλλαξε τίποτα στην εφαρμογή",
+            f"{msg}\n\nΕλέγξτε τη σύνδεση στο internet και δοκιμάστε ξανά.",
+            "Κλείσιμο", lambda: None, secondary_text=None)
+
     def card(self, parent, **kw):
         f = ctk.CTkFrame(parent, fg_color=CARD, corner_radius=16,
                          border_width=1, border_color="#e2e8f0", **kw)
         f.pack(fill="x", padx=18, pady=8)
         return f
+
+    # ---------- ΛΟΓΙΣΤΗΡΙΟ ----------
+    def export_accountant(self):
+        years = quote_years()
+        win = ctk.CTkToplevel(self)
+        win.title("Εξαγωγή για λογιστή")
+        win.geometry("470x330")
+        win.resizable(False, False)
+        win.configure(fg_color=BG)
+        win.update_idletasks()
+        try:
+            x = self.winfo_rootx() + max(0, (self.winfo_width() - win.winfo_width()) // 2)
+            y = self.winfo_rooty() + max(0, (self.winfo_height() - win.winfo_height()) // 2)
+            win.geometry(f"+{x}+{y}")
+        except Exception:
+            pass
+        self._popup_setup(win)
+
+        head = ctk.CTkFrame(win, fg_color=NAVY, corner_radius=0, height=82)
+        head.pack(fill="x")
+        head.pack_propagate(False)
+        ctk.CTkLabel(head, text="🧾  Λογιστήριο", font=("Arial", 19, "bold"),
+                     text_color="white", anchor="w").pack(anchor="w", padx=22, pady=(16, 0))
+        ctk.CTkLabel(head, text="Ένα αρχείο Excel με όλες τις προσφορές",
+                     font=("Arial", 12), text_color="#93c5fd",
+                     anchor="w").pack(anchor="w", padx=22)
+
+        card = ctk.CTkFrame(win, fg_color="white", corner_radius=14,
+                            border_width=1, border_color="#e2e8f0")
+        card.pack(fill="both", expand=True, padx=18, pady=12)
+        ctk.CTkLabel(card, text="Έτος", font=("Arial", 12, "bold"),
+                     text_color=TXTD).pack(anchor="w", padx=18, pady=(14, 2))
+        cb = ctk.CTkComboBox(card, values=["Όλα"] + [str(y) for y in years],
+                             width=220, font=("Arial", 13))
+        cb.set(str(years[0]))
+        cb.pack(anchor="w", padx=18)
+        ctk.CTkLabel(card,
+                     text="Αρχείο CSV (χωρισμένο με ;) που ανοίγει κατευθείαν στο Excel.\n"
+                          "Περιλαμβάνει αριθμό, ημερομηνία, πελάτη, είδη, καθαρή αξία, ΦΠΑ και σύνολο.",
+                     font=("Arial", 11), text_color=TXTG, justify="left",
+                     anchor="w", wraplength=400).pack(anchor="w", padx=18, pady=(10, 8))
+
+        def do_export():
+            value = cb.get().strip()
+            try:
+                year = None if value == "Όλα" else int(value)
+            except ValueError:
+                return messagebox.showwarning("Προσοχή", "Διάλεξε έτος από τη λίστα.", parent=win)
+            suffix = "ola" if year is None else str(year)
+            path = filedialog.asksaveasfilename(
+                parent=win, title="Αποθήκευση για λογιστή",
+                initialfile=f"Europa_Prosfores_{suffix}.csv",
+                defaultextension=".csv", filetypes=[("CSV για Excel", "*.csv")])
+            if not path:
+                return
+            try:
+                count = export_quotes_csv(path, year)
+            except Exception as exc:
+                log_exception(type(exc), exc, exc.__traceback__, "export_quotes_csv")
+                return messagebox.showerror("Σφάλμα", f"Η εξαγωγή απέτυχε.\n\n{exc}", parent=win)
+            win.destroy()
+            messagebox.showinfo("Έτοιμο", f"Εξήχθησαν {count} προσφορές.", parent=self)
+            open_folder_and_select(path)
+
+        foot = ctk.CTkFrame(card, fg_color="transparent")
+        foot.pack(fill="x", padx=18, pady=12)
+        ctk.CTkButton(foot, text="Άκυρο", fg_color="#e2e8f0", hover_color="#cbd5e1",
+                      text_color=TXTD, font=("Arial", 13, "bold"), width=100,
+                      command=win.destroy).pack(side="right", padx=(8, 0))
+        ctk.CTkButton(foot, text="Εξαγωγή CSV", fg_color=GREEN, hover_color="#15803d",
+                      font=("Arial", 13, "bold"), width=150,
+                      command=do_export).pack(side="right")
 
     def section(self, parent, txt, sub=""):
         box = ctk.CTkFrame(parent, fg_color="transparent")
@@ -1563,7 +2234,7 @@ class App(ctk.CTk):
                 pass
         tbox = ctk.CTkFrame(top, fg_color="transparent")
         tbox.pack(side="left")
-        ctk.CTkLabel(tbox, text=comp.get("name", "AluminaOffers"), font=("Arial", 22, "bold"),
+        ctk.CTkLabel(tbox, text=comp.get("name", APP_NAME), font=("Arial", 22, "bold"),
                      text_color=TXTD, anchor="w").pack(anchor="w")
         ctk.CTkLabel(tbox, text=datetime.now().strftime("%A %d/%m/%Y"),
                      font=("Arial", 12), text_color=TXTG, anchor="w").pack(anchor="w")
@@ -1609,6 +2280,7 @@ class App(ctk.CTk):
                 ("📁 Φάκελος PDF (αποστολή)", ACCENT, lambda: open_path_safe(PDF_DIR)),
                 ("📐 Νέο σχέδιο", BLUEH, lambda: (setattr(self, "_catalog_tab", "Σχέδια"), self.show("catalog"), self.design_dialog())),
                 ("📥 Εισαγωγή σχεδίων", "#8b5cf6", lambda: (setattr(self, "_catalog_tab", "Σχέδια"), self.show("catalog"), self.bulk_import())),
+                ("🧾 Εξαγωγή για λογιστή", "#0f766e", self.export_accountant),
                 ("⚙️ Στοιχεία & λογότυπο", "#64748b", lambda: self.show("settings"))]:
             ctk.CTkButton(right, text=txt, font=("Arial", 13, "bold"), height=44,
                           corner_radius=10, fg_color=col, anchor="w",
@@ -1809,30 +2481,20 @@ class App(ctk.CTk):
         def refresh():
             sub_mat = 0.0
             for row in rows:
-                try:
-                    q = float((row["e_q"].get() or "0").replace(",", "."))
-                except Exception:
-                    q = 0
-                try:
-                    p = float((row["e_p"].get() or "0").replace(",", "."))
-                except Exception:
-                    p = 0
+                q = parse_decimal(row["e_q"].get()) or 0.0
+                p = parse_decimal(row["e_p"].get()) or 0.0
                 q = max(0.0, min(q, 100000)); p = max(0.0, min(p, 10000000))
                 lt = q * p; sub_mat += lt
                 row["l_sum"].configure(text=fmt(lt))
 
             labor_amt = 0.0
             if labor_var.get():
-                try:
-                    labor_amt = float((e_labor_amt.get() or "0").replace(",", "."))
-                except Exception:
-                    labor_amt = 0.0
+                labor_amt = parse_decimal(e_labor_amt.get()) or 0.0
                 labor_amt = max(0.0, min(labor_amt, 10000000))
 
             sub = sub_mat + labor_amt
-            try:
-                vr = float(e_vat.get().replace(",", ".")) if e_vat.get() else DEFAULT_FPA
-            except Exception:
+            vr = parse_decimal(e_vat.get()) if e_vat.get().strip() else DEFAULT_FPA
+            if vr is None:
                 vr = DEFAULT_FPA
             vr = max(0.0, min(vr, 100.0))
             try:
@@ -2236,24 +2898,24 @@ class App(ctk.CTk):
             if not cname or cname == "CTkComboBox":
                 return messagebox.showwarning("Προσοχή", "Γράψε όνομα πελάτη")
             lines = []
-            for row in rows:
+            for line_no, row in enumerate(rows, 1):
                 name = row.get("name") or row["b_des"].cget("text")
                 w = row["e_w"].get().strip(); h = row["e_h"].get().strip()
                 p_str = row["e_p"].get().strip()
                 if name == "📐 Διάλεξε Σχέδιο..." and not w and not h and not p_str:
                     continue
-                try:
-                    q = float((row["e_q"].get() or "1").replace(",", "."))
-                except Exception:
-                    q = 1
-                try:
-                    p = float((p_str or "0").replace(",", "."))
-                except Exception:
-                    p = 0
+                q = parse_decimal(row["e_q"].get())
+                if q is None:
+                    if (row["e_q"].get() or "").strip():
+                        return messagebox.showwarning("Προσοχή", f"Η ποσότητα στη γραμμή {line_no} δεν είναι έγκυρος αριθμός.")
+                    q = 1.0
+                p = parse_decimal(p_str) if p_str else 0.0
+                if p is None:
+                    return messagebox.showwarning("Προσοχή", f"Η τιμή στη γραμμή {line_no} δεν είναι έγκυρος αριθμός.\nΔέχεται π.χ. 1500,50 ή 1.500,50.")
                 if q < 0 or p < 0:
-                    return messagebox.showwarning("Προσοχή", "Ποσότητα και τιμή δεν μπορεί να είναι αρνητικές.")
+                    return messagebox.showwarning("Προσοχή", f"Η γραμμή {line_no}: ποσότητα και τιμή δεν μπορεί να είναι αρνητικές.")
                 if q > 100000 or p > 10000000:
-                    return messagebox.showwarning("Προσοχή", "Ποσότητα/τιμή εκτός ορίων.")
+                    return messagebox.showwarning("Προσοχή", f"Η γραμμή {line_no}: ποσότητα/τιμή εκτός ορίων.")
                 
                 loc = row["e_loc"].get().strip()
                 base_name = row.get("name") or (f"{row.get('code', '')} Κούφωμα".strip() or "Κούφωμα")
@@ -2284,6 +2946,11 @@ class App(ctk.CTk):
                 discount_percent = parse_discount_percent(e_discount.get())
             except ValueError as exc:
                 return messagebox.showwarning("Προσφορά", str(exc))
+            vat_text = e_vat.get().strip()
+            if vat_text:
+                vat_check = parse_decimal(vat_text)
+                if vat_check is None or not 0 <= vat_check <= 100:
+                    return messagebox.showwarning("Προσοχή", "Ο ΦΠΑ πρέπει να είναι αριθμός από 0 έως 100.")
             sub, vr, vat, tot = refresh()
             phone = e_phone.get().strip()
             c = db()
@@ -2316,10 +2983,9 @@ class App(ctk.CTk):
             } for L in lines if L.get("image") or (L.get("width") and L.get("height"))]
             labor_amt = 0.0
             if labor_var.get():
-                try:
-                    labor_amt = float((e_labor_amt.get() or "0").replace(",", "."))
-                except Exception:
-                    labor_amt = 0.0
+                labor_amt = parse_decimal(e_labor_amt.get()) if (e_labor_amt.get() or "").strip() else 0.0
+                if labor_amt is None or labor_amt < 0:
+                    return messagebox.showwarning("Προσοχή", "Το κόστος εργασίας δεν είναι έγκυρο ποσό.")
 
             labor_desc_val = txt_labor_desc.get("1.0", "end").strip() if labor_var.get() else ""
 
@@ -2609,23 +3275,21 @@ class App(ctk.CTk):
             code = ents["code"].get().strip(); name = ents["name"].get().strip()
             if not code or not name:
                 return messagebox.showwarning("Προσοχή", "Συμπλήρωσε κωδικό και όνομα")
-            try:
-                pr = float(ents["price"].get().replace(",", ".") or 0)
-            except Exception:
-                pr = 0
+            price_text = ents["price"].get().strip()
+            pr = parse_decimal(price_text) if price_text else 0.0
+            if pr is None or pr < 0:
+                return messagebox.showwarning("Προσοχή", "Η τιμή του σχεδίου δεν είναι έγκυρος αριθμός.\nΔέχεται π.χ. 1500,50 ή 1.500,50.")
             mats = []
             for mrow in mat_rows:
                 nm = mrow["e"].get().strip()
                 if not nm:
                     continue
-                try:
-                    mq = float((mrow["q"].get() or "1").replace(",", "."))
-                except Exception:
-                    mq = 1
-                try:
-                    mp = float((mrow["p"].get() or "0").replace(",", "."))
-                except Exception:
-                    mp = 0
+                q_text = (mrow["q"].get() or "").strip()
+                mq = parse_decimal(q_text) if q_text else 1.0
+                p_text = (mrow["p"].get() or "").strip()
+                mp = parse_decimal(p_text) if p_text else 0.0
+                if mq is None or mq < 0 or mp is None or mp < 0:
+                    return messagebox.showwarning("Προσοχή", f"Υλικό «{nm}»: ποσότητα/τιμή δεν είναι έγκυρη.")
                 mats.append({"name": nm, "qty": mq, "unit": mrow["u"].get(), "price": mp})
             vals = (code, name, cb.get(), ents["width"].get().strip(), ents["height"].get().strip(),
                     ents["descr"].get().strip(), img_file["v"], pr, json.dumps(mats, ensure_ascii=False),
@@ -2671,10 +3335,9 @@ class App(ctk.CTk):
                 nm = en.get().strip()
                 if not nm:
                     return messagebox.showwarning("Προσοχή", "Βάλε όνομα υλικού")
-                try:
-                    pr = float(ep.get().replace(",", "."))
-                except Exception:
-                    return messagebox.showwarning("Προσοχή", "Βάλε έγκυρη τιμή")
+                pr = parse_decimal(ep.get())
+                if pr is None or pr < 0:
+                    return messagebox.showwarning("Προσοχή", "Βάλε έγκυρη τιμή (π.χ. 12,50 ή 1.250,00)")
                 c = db(); c.execute("UPDATE materials SET name=?, unit=?, price=? WHERE id=?", (nm, eu.get(), pr, i))
                 c.commit(); c.close()
                 d.destroy(); load()
@@ -2709,10 +3372,9 @@ class App(ctk.CTk):
                 ctk.CTkLabel(lst, text="Δεν βρέθηκαν υλικά.", font=("Arial", 13), text_color=TXTG).pack(pady=30)
 
         def add():
-            try:
-                pr = float(e_p.get().replace(",", "."))
-            except Exception:
-                return messagebox.showwarning("Προσοχή", "Βάλε σωστή τιμή")
+            pr = parse_decimal(e_p.get())
+            if pr is None or pr < 0:
+                return messagebox.showwarning("Προσοχή", "Βάλε σωστή τιμή (π.χ. 12,50 ή 1.250,00)")
             if not e_n.get().strip():
                 return messagebox.showwarning("Προσοχή", "Βάλε όνομα υλικού")
             c = db(); c.execute("INSERT INTO materials(name,unit,price) VALUES(?,?,?)",
@@ -2806,9 +3468,11 @@ class App(ctk.CTk):
 
     # ---------- ΣΤΟΙΧΕΙΑ & ΛΟΓΟΤΥΠΟ ----------
     def page_settings(self):
-        self.section(self.main, "Στοιχεία & Λογότυπο", "εμφανίζονται στο PDF της προσφοράς")
+        page = ctk.CTkScrollableFrame(self.main, fg_color=BG, corner_radius=0)
+        page.pack(fill="both", expand=True)
+        self.section(page, "Στοιχεία & Λογότυπο", "εμφανίζονται στο PDF της προσφοράς")
         comp = get_company()
-        box = self.card(self.main)
+        box = self.card(page)
         cols = ctk.CTkFrame(box, fg_color=CARD); cols.pack(fill="x", padx=14, pady=12)
         left = ctk.CTkFrame(cols, fg_color=CARD); left.pack(side="left", fill="both", expand=True)
         right = ctk.CTkFrame(cols, fg_color=ROWB, corner_radius=12, width=300)
@@ -2867,6 +3531,77 @@ class App(ctk.CTk):
                       height=48, fg_color=BLUEH, hover_color="#1e40af",
                       command=save).pack(padx=16, pady=12, fill="x")
 
+        self.section(page, "Ενημερώσεις", f"έκδοση v{__version__}")
+        ub = self.card(page)
+        row = ctk.CTkFrame(ub, fg_color=CARD)
+        row.pack(fill="x", padx=14, pady=12)
+        cached = self._read_settings(["update_checked_at"])
+        last = ""
+        try:
+            if cached.get("update_checked_at"):
+                last = datetime.fromisoformat(cached["update_checked_at"]).strftime("%d/%m/%Y %H:%M")
+        except Exception:
+            last = ""
+        info_txt = f"Τρέχουσα έκδοση: v{__version__}"
+        if last:
+            info_txt += f"  •  Τελευταίος έλεγχος: {last}"
+        ctk.CTkLabel(row, text=info_txt, font=("Arial", 13), text_color=TXTG,
+                     anchor="w").pack(side="left")
+        ctk.CTkButton(row, text="Έλεγχος για ενημερώσεις", fg_color=ACCENT, width=200,
+                      command=lambda: self._start_update_check(manual=True)).pack(side="right")
+        ctk.CTkButton(row, text="Προεπισκόπηση", fg_color="#64748b", hover_color="#475569",
+                      width=120, command=self.preview_update_dialog).pack(side="right", padx=6)
+
+        self.section(page, "Λογιστήριο & Υποστήριξη", "αρχεία και βοήθεια")
+        sb = self.card(page)
+        srow = ctk.CTkFrame(sb, fg_color=CARD)
+        srow.pack(fill="x", padx=14, pady=12)
+        ctk.CTkButton(srow, text="🧾 Εξαγωγή για λογιστή (CSV)", fg_color="#0f766e",
+                      hover_color="#115e59", width=220,
+                      command=self.export_accountant).pack(side="left", padx=(0, 8))
+        ctk.CTkButton(srow, text="📁 Φάκελος δεδομένων", fg_color="#64748b",
+                      hover_color="#475569", width=180,
+                      command=lambda: open_path_safe(BASE)).pack(side="left", padx=4)
+        ctk.CTkButton(srow, text="🛠️ Αρχείο σφαλμάτων", fg_color="#94a3b8",
+                      hover_color="#64748b", width=180,
+                      command=lambda: (open_path_safe(ERROR_LOG) if os.path.exists(ERROR_LOG)
+                                       else messagebox.showinfo(APP_NAME, "Δεν υπάρχει ακόμα αρχείο σφαλμάτων."))
+                      ).pack(side="left", padx=4)
+
+def _main_excepthook(exc_type, exc_value, exc_tb):
+    log_exception(exc_type, exc_value, exc_tb, "Unhandled")
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror(APP_NAME,
+                            "Η εφαρμογή αντιμετώπισε ένα σφάλμα.\n\n"
+                            f"Η λεπτομέρεια γράφτηκε στο:\n{ERROR_LOG}",
+                            parent=root)
+        root.destroy()
+    except Exception:
+        pass
+
 if __name__ == "__main__":
-    init_db()
+    if not acquire_single_instance():
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showinfo(APP_NAME,
+                            "Η εφαρμογή είναι ήδη ανοιχτή.\n"
+                            "Δείτε την ανοιχτή καρτέλα της.",
+                            parent=root)
+        root.destroy()
+        sys.exit(0)
+    sys.excepthook = _main_excepthook
+    try:
+        init_db()
+    except Exception as exc:
+        log_exception(type(exc), exc, exc.__traceback__, "init_db")
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror(APP_NAME,
+                            "Δεν ήταν δυνατό το άνοιγμα της βάσης δεδομένων.\n\n"
+                            f"Λεπτομέρειες: {ERROR_LOG}",
+                            parent=root)
+        root.destroy()
+        sys.exit(1)
     App().mainloop()

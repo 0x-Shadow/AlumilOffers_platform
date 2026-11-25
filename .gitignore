@@ -1,6 +1,9 @@
 # Local runtime data (personal, never commit)
+europa.db
 alumina.db
 logo.png
+errors.log
+europa.lock
 Sxedia/
 PDF_Prosfores/
 
@@ -11,11 +14,11 @@ Offers/
 build/
 dist/
 *.spec
-!AluminaOffers.spec
+!Europa.spec
 
 # Binaries (use GitHub Releases instead)
 *.exe
-/AluminaOffers
+/Europa
 
 # Python
 __pycache__/

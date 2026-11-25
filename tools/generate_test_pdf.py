@@ -1,4 +1,7 @@
 import json, os, sys, types
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
 # Provide dummy customtkinter module with minimal classes to allow app import
 class DummyWidget:
     def __init__(self, *args, **kwargs):
@@ -82,6 +85,6 @@ quote = {
     "labor_desc": ""
 }
 
-pdf_path = os.path.join(os.path.dirname(__file__), "PDF_Prosfores", "test_quote.pdf")
+pdf_path = os.path.join(ROOT, "PDF_Prosfores", "test_quote.pdf")
 make_pdf(quote, pdf_path)
 print(f"PDF generated at: {pdf_path}")
