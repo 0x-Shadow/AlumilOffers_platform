@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-Europa v1.5.1 - Προσφορές Αλουμινάδων για Windows
+Europa v1.5.2 - Προσφορές Αλουμινάδων για Windows
 Dashboard | Νέα Προσφορά (μία οθόνη) | Κατάλογος | Στοιχεία+Λογότυπο | PDF με ΦΠΑ
 """
-__version__ = "1.5.1"
+__version__ = "1.5.2"
 APP_NAME = "Europa"
 import os, sqlite3, json, shutil, re, html, sys, subprocess, unicodedata, urllib.parse, math
 import csv, queue, threading, traceback, webbrowser
@@ -1765,7 +1765,7 @@ class App(ctk.CTk):
             pass
 
     # ---------- ΕΝΗΜΕΡΩΣΕΙΣ (GitHub Releases) ----------
-    _UPDATE_CACHE_HOURS = 24
+    _UPDATE_CACHE_HOURS = 1
 
     def _ui_call(self, fn, *args):
         """Queue a callable for the Tk main thread (Tkinter is not thread-safe)."""

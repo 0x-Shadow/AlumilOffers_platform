@@ -112,7 +112,7 @@ Nothing is uploaded anywhere. See [docs/PRIVACY_EL.md](docs/PRIVACY_EL.md).
 
 ## Updates
 
-On startup (at most once every 24 h) the app asks the GitHub Releases API for the
+On startup (at most once per hour) the app asks the GitHub Releases API for the
 latest version. If a newer one exists, a modern dialog offers **Ενημέρωση τώρα**
 and the sidebar keeps a reminder card. The update downloads the official
 installer, verifies its SHA-256 against the release's `SHA256SUMS.txt`, runs it

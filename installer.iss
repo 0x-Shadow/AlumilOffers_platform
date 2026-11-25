@@ -1,9 +1,9 @@
 ; Europa — professional Windows installer (Inno Setup 6)
-; Build: iscc /DMyAppVersion=1.5.1 installer.iss
+; Build: iscc /DMyAppVersion=1.5.2 installer.iss
 ; CI passes the version read from app.py, so the installer never drifts.
 
 #ifndef MyAppVersion
-  #define MyAppVersion "1.5.1"
+  #define MyAppVersion "1.5.2"
 #endif
 #define MyAppName "Europa"
 #define MyAppPublisher "Europa"
