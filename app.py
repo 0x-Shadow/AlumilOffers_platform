@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-Europa v1.5.2 - Προσφορές Αλουμινάδων για Windows
+Europa v1.5.3 - Προσφορές Αλουμινάδων για Windows
 Dashboard | Νέα Προσφορά (μία οθόνη) | Κατάλογος | Στοιχεία+Λογότυπο | PDF με ΦΠΑ
 """
-__version__ = "1.5.2"
+__version__ = "1.5.3"
 APP_NAME = "Europa"
 import os, sqlite3, json, shutil, re, html, sys, subprocess, unicodedata, urllib.parse, math
 import csv, queue, threading, traceback, webbrowser
@@ -1317,32 +1317,52 @@ def make_pdf(q, filepath):
     labor_desc_lines = [esc(l.strip()) for l in labor_desc.splitlines() if l.strip()]
     labor_desc_html = "<br/>".join(labor_desc_lines) or esc(labor_desc)
 
-    design_img_cache = {}
+    catalog_info_cache = {}
+
+    def catalog_info(d):
+        """Catalog row for image and original dimensions, cached per code/name."""
+        code = str(d.get("code") or "").strip()
+        name = str(d.get("name") or "").strip()
+        key = (code.lower(), name.lower())
+        if key in catalog_info_cache:
+            return catalog_info_cache[key]
+        info = {}
+        try:
+            c = db()
+            row = None
+            if code:
+                row = c.execute("SELECT image, width, height FROM designs WHERE code=? LIMIT 1", (code,)).fetchone()
+            if not row and name:
+                row = c.execute("SELECT image, width, height FROM designs WHERE LOWER(name)=LOWER(?) LIMIT 1", (name,)).fetchone()
+            c.close()
+            info = dict(row) if row else {}
+        except Exception:
+            info = {}
+        catalog_info_cache[key] = info
+        return info
 
     def design_image_name(d):
         """Image from the quote, or from the catalog by code/name if the quote has none."""
         img = str(d.get("image") or "").strip()
         if img and img_path(img):
             return img
-        code = str(d.get("code") or "").strip()
-        name = str(d.get("name") or "").strip()
-        key = (code.lower(), name.lower())
-        if key in design_img_cache:
-            return design_img_cache[key]
-        found = ""
-        try:
-            c = db()
-            row = None
-            if code:
-                row = c.execute("SELECT image FROM designs WHERE code=? LIMIT 1", (code,)).fetchone()
-            if not row and name:
-                row = c.execute("SELECT image FROM designs WHERE LOWER(name)=LOWER(?) LIMIT 1", (name,)).fetchone()
-            c.close()
-            found = (row["image"] if row else "") or ""
-        except Exception:
-            found = ""
-        design_img_cache[key] = found
-        return found
+        return str(catalog_info(d).get("image") or "")
+
+    def dimensions_changed(d, item=None):
+        """True when the quote uses a size different from the catalog design."""
+        source = item or d
+        w = _num(source.get("width"))
+        h = _num(source.get("height"))
+        if not w or not h or w <= 0 or h <= 0:
+            return False
+        original = (d.get("orig_width"), d.get("orig_height"))
+        if not (_num(original[0]) and _num(original[1])):
+            info = catalog_info(d)
+            original = (info.get("width"), info.get("height"))
+        ow, oh = _num(original[0]), _num(original[1])
+        if not ow or not oh:
+            return False
+        return abs(float(w) - float(ow)) > 0.01 or abs(float(h) - float(oh)) > 0.01
 
     discount_percent = parse_discount_percent(q.get("discount_percent", 0))
     product_total = sum(float(it.get("qty", 0) or 0) * float(it.get("price", 0) or 0) for it in items)
@@ -1397,6 +1417,14 @@ def make_pdf(q, filepath):
                     fold_el(matched_design.get("name") or "").strip()
                 ):
                     matched_design = design
+
+        if matched_design and dimensions_changed(matched_design, item):
+            sized = dict(matched_design)
+            sized["width"] = item.get("width")
+            sized["height"] = item.get("height")
+            schematic = schematic_for(sized, show_labels=False)
+            if schematic:
+                return ScaledFlowable(schematic, 30*mm, 22*mm)
 
         img_name = str(item.get("image") or "").strip()
         pth = img_path(img_name) if img_name else None
@@ -1541,7 +1569,11 @@ def make_pdf(q, filepath):
         for idx, d in enumerate(designs, start=1):
             pth = img_path(design_image_name(d))
             art = None
-            if pth:
+            if dimensions_changed(d):
+                schematic = schematic_for(d, show_labels=True)
+                if schematic:
+                    art = ScaledFlowable(schematic, 52*mm, 34*mm)
+            if art is None and pth:
                 art = pdf_image(pth, max_w=52*mm, max_h=34*mm)
             if art is None:
                 schematic = schematic_for(d, show_labels=True)
@@ -2536,6 +2568,8 @@ class App(ctk.CTk):
             row["color"] = d.get("color", "") or ""
             row["descr"] = d.get("descr", "") or ""
             row["image"] = d.get("image", "") or ""
+            row["orig_width"] = d.get("width", "") or ""
+            row["orig_height"] = d.get("height", "") or ""
 
             if d.get("width"):
                 row["e_w"].delete(0, "end"); row["e_w"].insert(0, str(d["width"]))
@@ -2824,6 +2858,8 @@ class App(ctk.CTk):
             nr["color"] = src.get("color", "")
             nr["descr"] = src.get("descr", "")
             nr["image"] = src.get("image", "")
+            nr["orig_width"] = src.get("orig_width", "")
+            nr["orig_height"] = src.get("orig_height", "")
             nr["materials"] = list(src.get("materials", []))
             nr["e_w"].delete(0, "end"); nr["e_w"].insert(0, src["e_w"].get())
             nr["e_h"].delete(0, "end"); nr["e_h"].insert(0, src["e_h"].get())
@@ -2854,7 +2890,8 @@ class App(ctk.CTk):
             
             row = {"frame": r, "b_des": b_des, "e_w": e_w, "e_h": e_h, "e_loc": e_loc,
                    "e_q": e_q, "e_p": e_p, "l_sum": l_sum, "code": "", "name": "", "series": "",
-                   "color": "", "descr": "", "image": "", "category": "", "materials": []}
+                   "color": "", "descr": "", "image": "", "category": "", "materials": [],
+                   "orig_width": "", "orig_height": ""}
             
             b_des.configure(command=lambda: (active_row_ref.__setitem__(0, row), pick_design(row)))
             for e in (e_w, e_h, e_loc, e_q, e_p):
@@ -2971,7 +3008,9 @@ class App(ctk.CTk):
                 cur = c.execute("INSERT INTO customers(name,phone,email,address) VALUES(?,?,?,?)",
                                 (cname, phone, "", ""))
                 cid = cur.lastrowid; cinfo = phone
-            items = [{"name": L["name"], "unit": L["unit"], "qty": L["qty"], "price": L["price"]} for L in lines]
+            items = [{"name": L["name"], "base": L["base"], "unit": L["unit"],
+                      "qty": L["qty"], "price": L["price"], "code": L["code"],
+                      "width": L["width"], "height": L["height"], "image": L["image"]} for L in lines]
             qdesigns = [{
                 "code": L["code"],
                 "name": L["base"],
@@ -2981,6 +3020,8 @@ class App(ctk.CTk):
                 "location": L["location"],
                 "width": L["width"],
                 "height": L["height"],
+                "orig_width": L.get("orig_width", ""),
+                "orig_height": L.get("orig_height", ""),
                 "descr": L["descr"],
                 "image": L["image"],
                 "qty": L["qty"],
