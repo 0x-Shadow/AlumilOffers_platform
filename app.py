@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-Europa v1.5.3 - Προσφορές Αλουμινάδων για Windows
+Europa v1.5.4 - Προσφορές Αλουμινάδων για Windows
 Dashboard | Νέα Προσφορά (μία οθόνη) | Κατάλογος | Στοιχεία+Λογότυπο | PDF με ΦΠΑ
 """
-__version__ = "1.5.3"
+__version__ = "1.5.4"
 APP_NAME = "Europa"
 import os, sqlite3, json, shutil, re, html, sys, subprocess, unicodedata, urllib.parse, math
 import csv, queue, threading, traceback, webbrowser
@@ -1734,6 +1734,7 @@ class App(ctk.CTk):
         self._update_info = None
         self._update_thread = None
         self._update_dialog_win = None
+        self._update_prompted_session = False
         # Demo hook: ALUMINA_FAKE_UPDATE=1 shows the real update prompt without
         # publishing a release or downloading anything.
         self._fake_update = (os.environ.get("EUROPA_FAKE_UPDATE")
@@ -1797,7 +1798,6 @@ class App(ctk.CTk):
             pass
 
     # ---------- ΕΝΗΜΕΡΩΣΕΙΣ (GitHub Releases) ----------
-    _UPDATE_CACHE_HOURS = 1
 
     def _ui_call(self, fn, *args):
         """Queue a callable for the Tk main thread (Tkinter is not thread-safe)."""
@@ -1861,21 +1861,20 @@ class App(ctk.CTk):
         self._update_thread.start()
 
     def _update_check_worker(self, manual):
-        cached = self._read_settings(["update_checked_at", "update_info"])
-        if not manual and cached.get("update_checked_at"):
-            try:
-                age = datetime.now() - datetime.fromisoformat(cached["update_checked_at"])
-                if age.total_seconds() < self._UPDATE_CACHE_HOURS * 3600:
-                    info = json.loads(cached.get("update_info") or "null")
-                    if info and updater.is_newer(info.get("version", ""), __version__):
-                        self._ui_call(self._offer_update, info)
-                    return
-            except Exception:
-                pass
+        cached = self._read_settings(["update_info"])
+        cached_info = None
+        try:
+            cached_info = json.loads(cached.get("update_info") or "null")
+        except Exception:
+            cached_info = None
         try:
             info = updater.check_for_update(__version__)
         except Exception:
-            if manual:
+            # Offline: still offer a known newer release from the last check.
+            if not manual and cached_info and updater.is_newer(
+                    cached_info.get("version", ""), __version__):
+                self._ui_call(self._offer_update, cached_info)
+            elif manual:
                 self._ui_call(messagebox.showwarning, "Ενημερώσεις",
                               "Ο έλεγχος δεν ήταν δυνατός.\nΕλέγξτε τη σύνδεσή σας και δοκιμάστε ξανά.")
             return
@@ -1917,13 +1916,11 @@ class App(ctk.CTk):
         self._update_label.configure(text=f"v{info.get('version', '?')} διαθέσιμη{demo}")
         self._update_btn.configure(state="normal", text="Ενημέρωση τώρα")
 
-        # A real prompt for non-technical users: ask once per version, keep the
-        # sidebar card as the permanent reminder after they choose "later".
-        prompted = self._read_settings(["update_prompted"]).get("update_prompted", "")
-        if not (force or self._fake_update or prompted != info.get("version")):
+        # A real prompt for non-technical users: show it on every launch until
+        # the update is installed; the sidebar stays as a reminder after "later".
+        if not (force or self._fake_update or not self._update_prompted_session):
             return
-        if not self._fake_update:
-            self._write_setting("update_prompted", info.get("version", ""))
+        self._update_prompted_session = True
         self._update_dialog(
             "Ενημέρωση διαθέσιμη",
             f"{APP_NAME} v{__version__}   →   v{info.get('version', '?')}",
