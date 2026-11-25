@@ -1,9 +1,9 @@
 ; Europa — professional Windows installer (Inno Setup 6)
-; Build: iscc /DMyAppVersion=1.5.4 installer.iss
+; Build: iscc /DMyAppVersion=1.5.5 installer.iss
 ; CI passes the version read from app.py, so the installer never drifts.
 
 #ifndef MyAppVersion
-  #define MyAppVersion "1.5.4"
+  #define MyAppVersion "1.5.5"
 #endif
 #define MyAppName "Europa"
 #define MyAppPublisher "Europa"
@@ -64,4 +64,7 @@ Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
+; Always relaunch, including the silent in-app update, so the user is not left
+; without an open app after Setup finishes. The flag lets it wait for the old
+; process to release the single-instance lock.
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--updated"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait

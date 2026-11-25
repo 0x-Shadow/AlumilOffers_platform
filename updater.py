@@ -190,7 +190,7 @@ def launch_installer(path):
     if not os.path.isfile(path):
         raise UpdateError("Installer file not found.")
     subprocess.Popen(
-        [path, "/SILENT", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS",
+        [path, "/SILENT", "/CLOSEAPPLICATIONS",
          "/NORESTART", "/SUPPRESSMSGBOXES"],
         close_fds=True,
     )

@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-Europa v1.5.4 - Προσφορές Αλουμινάδων για Windows
+Europa v1.5.5 - Προσφορές Αλουμινάδων για Windows
 Dashboard | Νέα Προσφορά (μία οθόνη) | Κατάλογος | Στοιχεία+Λογότυπο | PDF με ΦΠΑ
 """
-__version__ = "1.5.4"
+__version__ = "1.5.5"
 APP_NAME = "Europa"
 import os, sqlite3, json, shutil, re, html, sys, subprocess, unicodedata, urllib.parse, math
-import csv, queue, threading, traceback, webbrowser
+import csv, queue, threading, time, traceback, webbrowser
 from datetime import datetime
 import tkinter as tk
 from tkinter import messagebox, filedialog
@@ -296,32 +296,43 @@ ERROR_LOG = os.path.join(BASE, "errors.log")
 
 _INSTANCE_LOCK = None
 
-def acquire_single_instance():
-    """True when this is the only Europa instance for the current user."""
+def acquire_single_instance(wait_seconds=0):
+    """True when this is the only Europa instance for the current user.
+
+    `wait_seconds` lets the freshly installed app wait for the old process to
+    release the lock during an in-app update, instead of giving up immediately.
+    """
     global _INSTANCE_LOCK
-    try:
-        if sys.platform == "win32":
-            import ctypes
-            kernel32 = ctypes.windll.kernel32
-            handle = kernel32.CreateMutexW(None, False, "EuropaAluminaOffers")
-            if not handle:
-                return True  # never block the app if the OS call fails
-            if kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-                return False
-            _INSTANCE_LOCK = handle
-            return True
-        import fcntl
-        lock_file = open(os.path.join(BASE, "europa.lock"), "a+")
+    deadline = time.monotonic() + max(0, wait_seconds)
+    while True:
         try:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            lock_file.close()
+            if sys.platform == "win32":
+                import ctypes
+                kernel32 = ctypes.windll.kernel32
+                handle = kernel32.CreateMutexW(None, False, "EuropaAluminaOffers")
+                if not handle:
+                    return True  # never block the app if the OS call fails
+                if kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+                    kernel32.CloseHandle(handle)
+                else:
+                    _INSTANCE_LOCK = handle
+                    return True
+            else:
+                import fcntl
+                lock_file = open(os.path.join(BASE, "europa.lock"), "a+")
+                try:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    lock_file.close()
+                else:
+                    _INSTANCE_LOCK = lock_file
+                    return True
+        except (OSError, ImportError):
+            # Fail open only for unexpected platform errors, never for a held lock.
+            return True
+        if time.monotonic() >= deadline:
             return False
-        _INSTANCE_LOCK = lock_file
-        return True
-    except (OSError, ImportError):
-        # Fail open only for unexpected platform errors, never for a held lock.
-        return True
+        time.sleep(0.25)
 
 def log_exception(exc_type, exc_value, exc_tb, context=""):
     """Append a technical traceback to the user's errors.log (for support)."""
@@ -2136,8 +2147,9 @@ class App(ctk.CTk):
                     "Κλείσιμο", lambda: None, secondary_text=None)
                 self._update_btn.configure(state="normal", text="Δοκιμάστε ξανά")
                 return
-            # Restart Manager normally closes/restarts the app; this is a fallback.
-            self.after(5000, self.destroy)
+            # Leave immediately so the installer can replace files and release
+            # the single-instance lock for the app it launches afterwards.
+            self.after(250, self.destroy)
 
         self._update_dialog(
             "Η ενημέρωση είναι έτοιμη",
@@ -3627,7 +3639,7 @@ def _main_excepthook(exc_type, exc_value, exc_tb):
         pass
 
 if __name__ == "__main__":
-    if not acquire_single_instance():
+    if not acquire_single_instance(20 if "--updated" in sys.argv[1:] else 0):
         root = tk.Tk()
         root.withdraw()
         messagebox.showinfo(APP_NAME,
